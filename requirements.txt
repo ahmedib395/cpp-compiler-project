@@ -1,0 +1,2 @@
+# No external dependencies required for this compiler.
+# This file is here to help Render/Heroku detect the Python environment.

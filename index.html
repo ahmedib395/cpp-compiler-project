@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Right Most Derivation Compiler</title>
+    <meta name="description"
+        content="A full C++ compiler pipeline using Right-Most Derivation — Lexical, Syntax (SLR-1), Semantic, ICG.">
+
+    <!-- CodeMirror -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/idea.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/clike/clike.min.js"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <style>
+        /* ================================================================
+           DESIGN TOKENS
+        ================================================================ */
+        :root {
+            --bg-main: #f0f2f5;
+            --bg-pane: #ffffff;
+            --text-main: #1e2433;
+            --text-muted: #6b7280;
+            --border: #e2e8f0;
+            --primary: #5b4cf5;
+            --primary-h: #4338ca;
+            --success: #10b981;
+            --error: #ef4444;
+            --warn: #f59e0b;
+            --header-bg: #ffffff;
+            --tab-bg: #f8fafc;
+            --tab-active: #ffffff;
+            --code-bg: #ffffff;
+            --term-bg: #f8fafc;
+            --term-text: #065f46;
+            --diag-bg: #f8fafc;
+            --diag-text: #475569;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+            --radius: 10px;
+        }
+
+        [data-theme="dark"] {
+            --bg-main: #080c14;
+            --bg-pane: #0f1623;
+            --text-main: #e8edf5;
+            --text-muted: #7c8ba1;
+            --border: #1e2d42;
+            --primary: #6d66f7;
+            --primary-h: #8b85ff;
+            --success: #34d399;
+            --error: #f87171;
+            --warn: #fbbf24;
+            --header-bg: #0b1120;
+            --tab-bg: #0a1020;
+            --tab-active: #111827;
+            --code-bg: #080c14;
+            --term-bg: #020408;
+            --term-text: #4ade80;
+            --diag-bg: #050810;
+            --diag-text: #8fa3b8;
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        *,
+        *::before,
+        *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-main);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: background .3s, color .3s;
+        }
+
+        /* ── HEADER ─────────────────────────────────── */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem 1.5rem;
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border);
+            z-index: 20;
+            flex-shrink: 0;
+            gap: 1rem;
+        }
+
+        .logo {
+            font-size: 1.05rem;
+            font-weight: 800;
+            letter-spacing: -.5px;
+            background: linear-gradient(130deg, var(--primary), #a78bfa, #38bdf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            white-space: nowrap;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+        }
+
+        .btn {
+            padding: .45rem .9rem;
+            border-radius: 7px;
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            font-size: .82rem;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-main);
+            transition: all .18s;
+            white-space: nowrap;
+        }
+
+        .btn:hover {
+            background: var(--bg-main);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), #818cf8);
+            color: #fff;
+            border: none;
+            box-shadow: 0 4px 14px rgba(109, 102, 247, .35);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary:hover {
+            filter: brightness(1.12);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(109, 102, 247, .45);
+            background: linear-gradient(135deg, var(--primary), #818cf8);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary:disabled {
+            opacity: .6;
+            cursor: wait;
+            filter: none;
+            transform: none;
+        }
+
+        /* ── LAYOUT ─────────────────────────────────── */
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 230px;
+            gap: .6rem;
+            padding: .6rem;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        #editorPanel {
+            grid-column: 1;
+            grid-row: 1;
+        }
+
+        #phasesPanel {
+            grid-column: 2;
+            grid-row: 1;
+        }
+
+        #bottomRow {
+            grid-column: 1 / -1;
+            grid-row: 2;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: .6rem;
+        }
+
+        /* ── PANE ────────────────────────────────────── */
+        .pane {
+            background: var(--bg-pane);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            transition: background .3s, border-color .3s;
+            min-height: 0;
+        }
+
+        .pane-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: .5rem 1rem;
+            font-size: .75rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+            background: var(--tab-bg);
+            letter-spacing: .04em;
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .dot-blue {
+            background: var(--primary);
+            box-shadow: 0 0 6px var(--primary);
+        }
+
+        .dot-green {
+            background: var(--success);
+            box-shadow: 0 0 6px var(--success);
+        }
+
+        .dot-gray {
+            background: var(--text-muted);
+        }
+
+        /* ── CODEMIRROR ──────────────────────────────── */
+        .CodeMirror {
+            flex: 1;
+            height: 100% !important;
+            font-family: 'Fira Code', monospace !important;
+            font-size: 13.5px;
+            line-height: 1.6;
+        }
+
+        /* ── TABS ────────────────────────────────────── */
+        .tabs {
+            display: flex;
+            background: var(--tab-bg);
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+            flex-shrink: 0;
+        }
+
+        .tab-btn {
+            padding: .55rem 1rem;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: .77rem;
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .18s;
+            position: relative;
+            white-space: nowrap;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+        }
+
+        .tab-btn.active {
+            color: var(--primary);
+            background: var(--tab-active);
+        }
+
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary), #818cf8);
+            border-radius: 2px 2px 0 0;
+        }
+
+        .tab-btn.has-error {
+            color: var(--error) !important;
+        }
+
+        .tab-body {
+            flex: 1;
+            overflow: auto;
+            padding: .9rem 1rem;
+            background: var(--code-bg);
+        }
+
+        .tab-content {
+            display: none;
+            font-family: 'Fira Code', monospace;
+            font-size: .79rem;
+            color: var(--text-main);
+            white-space: pre-wrap;
+            line-height: 1.65;
+            animation: fadeIn .2s ease-out;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ── DIAGNOSTICS PANE ────────────────────────── */
+        #consolePane .pane-header {
+            background: var(--tab-bg);
+        }
+
+        .diag-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: .75rem 1rem;
+            background: var(--diag-bg);
+            font-family: 'Fira Code', monospace;
+            font-size: .79rem;
+            color: var(--diag-text);
+            white-space: pre-wrap;
+            line-height: 1.7;
+            transition: background .3s, color .3s;
+        }
+
+        .c-pass {
+            color: #34d399;
+        }
+
+        .c-fail {
+            color: #f87171;
+        }
+
+        .c-info {
+            color: #60a5fa;
+        }
+
+        .c-muted {
+            color: #4a5568;
+        }
+
+        /* ================================================================
+           PROGRAM OUTPUT — interactive terminal
+        ================================================================ */
+        #outputPane .pane-header {
+            background: var(--tab-bg);
+        }
+
+        .term-body {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--term-bg);
+            overflow: hidden;
+        }
+
+        /* scrollable history */
+        #termHistory {
+            flex: 1;
+            overflow-y: auto;
+            padding: .6rem .8rem .2rem;
+            font-family: 'Fira Code', monospace;
+            font-size: .82rem;
+            color: var(--term-text);
+            white-space: pre-wrap;
+            line-height: 1.7;
+            transition: color .3s;
+        }
+
+        /* input row — only visible when asking for input */
+        #termInputRow {
+            display: none;
+            align-items: center;
+            gap: 0;
+            padding: .1rem .8rem .5rem;
+            background: var(--term-bg);
+            border-top: 1px solid var(--border);
+        }
+
+        #termInputRow.visible {
+            display: flex;
+        }
+
+        #termPromptLabel {
+            font-family: 'Fira Code', monospace;
+            font-size: .82rem;
+            color: var(--term-text);
+            white-space: nowrap;
+        }
+
+        #termInput {
+            flex: 1;
+            border: none;
+            background: transparent;
+            color: var(--term-text);
+            outline: none;
+            font-family: 'Fira Code', monospace;
+            font-size: .82rem;
+            caret-color: #4ade80;
+            padding: 0 .3rem;
+        }
+
+        #termInput::placeholder {
+            color: #1a3d27;
+        }
+
+        /* blinking cursor when idle */
+        .term-cursor {
+            display: inline-block;
+            width: 7px;
+            height: .9em;
+            background: #4ade80;
+            vertical-align: text-bottom;
+            animation: blink 1s step-end infinite;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+
+        /* ── SCROLLBARS ──────────────────────────────── */
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        /* ── RESPONSIVE ──────────────────────────────── */
+        @media (max-width: 900px) {
+            main {
+                grid-template-columns: 1fr;
+                grid-template-rows: 1fr 1fr 230px;
+            }
+
+            #editorPanel {
+                grid-column: 1;
+                grid-row: 1;
+            }
+
+            #phasesPanel {
+                grid-column: 1;
+                grid-row: 2;
+            }
+
+            #bottomRow {
+                grid-column: 1;
+                grid-row: 3;
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ── HEADER ─────────────────────────────────────────────────── -->
+    <header>
+        <div class="logo">Right Most Derivation Compiler</div>
+        <div class="header-actions">
+            <button class="btn" id="themeToggle" title="Toggle theme">
+                <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    style="vertical-align:middle;margin-right:4px">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>Theme
+            </button>
+            <button class="btn btn-primary" id="compileBtn" title="Ctrl+Enter">
+                <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>Run Build
+            </button>
+        </div>
+    </header>
+
+    <!-- ── MAIN ───────────────────────────────────────────────────── -->
+    <main>
+
+        <!-- Editor -->
+        <div class="pane" id="editorPanel">
+            <div class="pane-header">
+                <div class="dot dot-blue"></div>
+                Source Code (.cpp)
+            </div>
+            <textarea id="codeEditor">#include &lt;iostream&gt;
+using namespace std;
+
+int main() {
+    int a;
+    int b;
+    cin &gt;&gt; a &gt;&gt; b;
+
+    int sum = a + b;
+    cout &lt;&lt; "Sum: " &lt;&lt; sum &lt;&lt; endl;
+
+    int limit = 10;
+    while (a &lt; limit) {
+        a = a + 1;
+        if (a == 5) {
+            continue;
+        }
+    }
+
+    cout &lt;&lt; "Final a: " &lt;&lt; a &lt;&lt; endl;
+    return 0;
+}</textarea>
+        </div>
+
+        <!-- Phases -->
+        <div class="pane" id="phasesPanel">
+            <div class="tabs">
+                <button class="tab-btn active" data-target="phase1" id="tab1">Phase 1 — Tokens</button>
+                <button class="tab-btn" data-target="phase2" id="tab2">Phase 2 — AST</button>
+                <button class="tab-btn" data-target="phase3" id="tab3">Phase 3 — Symbols</button>
+                <button class="tab-btn" data-target="phase4" id="tab4">Phase 4 — TAC</button>
+            </div>
+            <div class="tab-body">
+                <pre id="phase1" class="tab-content active">Compile code to view Lexical Tokens...</pre>
+                <pre id="phase2" class="tab-content">Compile code to view Abstract Syntax Tree...</pre>
+                <pre id="phase3" class="tab-content">Compile code to view Symbol Table...</pre>
+                <pre id="phase4" class="tab-content">Compile code to view Three-Address Code...</pre>
+            </div>
+        </div>
+
+        <!-- Bottom Row -->
+        <div id="bottomRow">
+
+            <!-- Diagnostics -->
+            <div class="pane" id="consolePane">
+                <div class="pane-header">
+                    <div class="dot dot-gray"></div>
+                    Compiler Diagnostics
+                </div>
+                <div class="diag-body" id="console">Ready to build...</div>
+            </div>
+
+            <!-- Program Output -->
+            <div class="pane" id="outputPane">
+                <div class="pane-header" style="color:#34d399;">
+                    <div class="dot dot-green"></div>
+                    Program Output
+                </div>
+                <div class="term-body">
+                    <div id="termHistory"><span class="term-cursor"></span></div>
+                    <div id="termInputRow">
+                        <span id="termPromptLabel">&gt;&nbsp;</span>
+                        <input id="termInput" type="text" autocomplete="off" spellcheck="false">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // ── CodeMirror ────────────────────────────────────────────────────
+        const editor = CodeMirror.fromTextArea(document.getElementById('codeEditor'), {
+            lineNumbers: true,
+            mode: 'text/x-c++src',
+            theme: 'dracula',
+            indentUnit: 4,
+            tabSize: 4,
+            matchBrackets: true,
+            lineWrapping: false,
+        });
+
+        // ── Theme ─────────────────────────────────────────────────────────
+        document.getElementById('themeToggle').addEventListener('click', () => {
+            const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+            document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+            editor.setOption('theme', dark ? 'idea' : 'dracula');
+        });
+
+        // ── Tab switching ─────────────────────────────────────────────────
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.target).classList.add('active');
+            });
+        });
+        function switchTab(n) {
+            setTimeout(() => document.getElementById('tab' + n).click(), 250);
+        }
+
+        // ── Terminal helpers ──────────────────────────────────────────────
+        const termHistory = document.getElementById('termHistory');
+        const termInputRow = document.getElementById('termInputRow');
+        const termInput = document.getElementById('termInput');
+        const termPrompt = document.getElementById('termPromptLabel');
+
+        function termClear() {
+            termHistory.innerHTML = '';
+            hideTermInput();
+        }
+
+        function termWrite(text, cls = '') {
+            // Remove cursor before adding text
+            const cur = termHistory.querySelector('.term-cursor');
+            if (cur) cur.remove();
+
+            const span = document.createElement('span');
+            if (cls) span.className = cls;
+            span.textContent = text;
+            termHistory.appendChild(span);
+            termHistory.scrollTop = termHistory.scrollHeight;
+        }
+
+        function termWriteLn(text, cls = '') {
+            termWrite(text + '\n', cls);
+        }
+
+        function termAddCursor() {
+            const cur = document.createElement('span');
+            cur.className = 'term-cursor';
+            termHistory.appendChild(cur);
+            termHistory.scrollTop = termHistory.scrollHeight;
+        }
+
+        function showTermInput(promptText) {
+            termPrompt.textContent = promptText + ' ';
+            termInputRow.classList.add('visible');
+            termInput.value = '';
+            termInput.focus();
+        }
+
+        function hideTermInput() {
+            termInputRow.classList.remove('visible');
+            termInput.value = '';
+        }
+
+        // ── Diagnostics helpers ───────────────────────────────────────────
+        const diagEl = document.getElementById('console');
+
+        function diagClear() { diagEl.innerHTML = ''; }
+        function diagLine(txt, cls) {
+            const s = document.createElement('span');
+            if (cls) s.className = cls;
+            s.textContent = txt + '\n';
+            diagEl.appendChild(s);
+            diagEl.scrollTop = diagEl.scrollHeight;
+        }
+        function diagRaw(txt) {
+            // Parse PASS / FAILED lines and colour them
+            txt.split('\n').forEach(line => {
+                if (line.includes('PASS')) diagLine(line, 'c-pass');
+                else if (line.includes('FAILED')) diagLine(line, 'c-fail');
+                else if (line.includes('>>')) diagLine(line, 'c-info');
+                else if (line.trim() === '') diagLine('');
+                else diagLine(line);
+            });
+        }
+
+        // ── Compile ───────────────────────────────────────────────────────
+        const compileBtn = document.getElementById('compileBtn');
+        const RUN_ICON = `<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+</svg> Run Build`;
+
+        let currentCode = '';
+        let stdinBuffer = [];     // collected cin inputs
+        let totalReads = 0;      // how many 'read' instructions
+
+        compileBtn.addEventListener('click', startCompile);
+        document.addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                startCompile();
+            }
+        });
+
+        async function startCompile() {
+            // reset
+            compileBtn.innerHTML = '⏳ Compiling...';
+            compileBtn.disabled = true;
+
+            ['phase1', 'phase2', 'phase3', 'phase4'].forEach(id => document.getElementById(id).textContent = '');
+            ['tab1', 'tab2', 'tab3', 'tab4'].forEach(id => document.getElementById(id).classList.remove('has-error'));
+
+            diagClear();
+            termClear();
+            termWrite('Compiling...', 'c-muted');
+            stdinBuffer = [];
+            totalReads = 0;
+            currentCode = editor.getValue();
+
+            try {
+                const resp = await fetch('http://localhost:8000/compile', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: currentCode })
+                });
+                const data = await resp.json();
+
+                // Fill phase tabs
+                document.getElementById('phase1').textContent = data.tokens || '';
+                document.getElementById('phase2').textContent = data.ast || '';
+                document.getElementById('phase3').textContent = data.symbol_table || '';
+                document.getElementById('phase4').textContent = data.tac || '';
+
+                // Diagnostics
+                diagClear();
+                diagRaw(data.console || '');
+
+                if (!data.success) {
+                    // Error — highlight failing tab
+                    if (data.error_phase) {
+                        document.getElementById('tab' + data.error_phase).classList.add('has-error');
+                        switchTab(data.error_phase);
+                    }
+                    termClear();
+                    termWriteLn('Build failed. See Compiler Diagnostics.', 'c-fail');
+                    termAddCursor();
+                    compileBtn.innerHTML = RUN_ICON;
+                    compileBtn.disabled = false;
+                    return;
+                }
+
+                // Success — move to TAC tab
+                switchTab(4);
+                termClear();
+
+                totalReads = data.read_count || 0;
+
+                if (totalReads === 0) {
+                    // No cin — run immediately
+                    await runProgram([]);
+                } else {
+                    // Ask for inputs interactively
+                    termWriteLn('Build OK. Program needs ' + totalReads + ' input value(s).\n', 'c-info');
+                    askNextInput();
+                }
+
+            } catch (err) {
+                diagClear();
+                diagLine('⛔ Connection Error — is server.py running?', 'c-fail');
+                diagLine(String(err), 'c-fail');
+                termClear();
+                termWriteLn('Server offline.', 'c-fail');
+                termAddCursor();
+            } finally {
+                compileBtn.innerHTML = RUN_ICON;
+                compileBtn.disabled = false;
+            }
+        }
+
+        // ── Interactive input collection ──────────────────────────────────
+        function askNextInput() {
+            const idx = stdinBuffer.length;
+            if (idx >= totalReads) {
+                // All inputs collected — run
+                hideTermInput();
+                runProgram(stdinBuffer);
+                return;
+            }
+            const ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
+            const ord = ordinals[idx] || (idx + 1) + 'th';
+            showTermInput(`Waiting for ${ord} input value...`);
+        }
+
+        // When user presses Enter in the terminal input
+        termInput.addEventListener('keydown', e => {
+            if (e.key !== 'Enter') return;
+            const val = termInput.value.trim();
+            if (val === '') return;
+
+            // Echo the typed value into terminal history
+            termWriteLn('> ' + val, '');
+            stdinBuffer.push(val);
+            hideTermInput();
+
+            if (stdinBuffer.length < totalReads) {
+                askNextInput();
+            } else {
+                runProgram(stdinBuffer);
+            }
+        });
+
+        // ── Execute Code ──────────────────────────────────────────────────
+        async function runProgram(stdinValues) {
+            termWriteLn('\n--- Program Output ---', 'c-info');
+            try {
+                const resp = await fetch('http://localhost:8000/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: currentCode, stdin: stdinValues })
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    // Show output line by line
+                    const lines = (data.program_output || '').split('\n');
+                    lines.forEach((line, i) => {
+                        if (i < lines.length - 1 || line.trim() !== '') {
+                            termWriteLn(line);
+                        }
+                    });
+                    termWriteLn('\n--- Execution complete ---', 'c-info');
+                } else {
+                    termWriteLn('Runtime Error: ' + data.error, 'c-fail');
+                }
+            } catch (err) {
+                termWriteLn('Execution Error: ' + err, 'c-fail');
+            }
+            termAddCursor();
+        }
+
+    </script>
+</body>
+
+</html>

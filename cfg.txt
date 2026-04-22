@@ -1,0 +1,62 @@
+# Context Free Grammar (CFG) for Phase 1 - 4
+# Right-Most Derivation manually constructed.
+# Uses exact terminal token types matched in lexer.py.
+
+Program -> GlobalList
+
+# Left Recursion for lists (Excellent for Bottom-Up SLR)
+GlobalList -> GlobalList Global | empty
+Global -> IncludeStmt | UsingStmt | FunctionDef | Declaration
+
+IncludeStmt -> PREPROCESSOR
+UsingStmt -> USING NAMESPACE IDENTIFIER SEMI
+FunctionDef -> Type MAIN LPAREN RPAREN LBRACE StatementList RBRACE
+# We only support main() for simplicity right now
+# Or we can do:
+# FunctionDef -> Type IDENTIFIER LPAREN RPAREN LBRACE StatementList RBRACE
+
+Type -> INT | FLOAT | DOUBLE
+
+StatementList -> StatementList Statement | empty
+Statement -> Declaration \
+           | Assignment \
+           | WhileLoop \
+           | IfStatement \
+           | BreakStmt \
+           | ContinueStmt \
+           | CinStmt \
+           | CoutStmt \
+           | ReturnStmt
+
+Declaration -> Type IDENTIFIER SEMI | Type IDENTIFIER ASSIGN Expression SEMI
+Assignment -> IDENTIFIER ASSIGN Expression SEMI
+
+WhileLoop -> WHILE LPAREN Condition RPAREN LBRACE StatementList RBRACE
+IfStatement -> IF LPAREN Condition RPAREN LBRACE StatementList RBRACE ElsePart
+ElsePart -> ELSE LBRACE StatementList RBRACE | empty
+
+BreakStmt -> BREAK SEMI
+ContinueStmt -> CONTINUE SEMI
+ReturnStmt -> RETURN Expression SEMI | RETURN SEMI
+
+CinStmt -> CIN SHR IDENTIFIER SEMI
+CoutStmt -> COUT CoutCascade SEMI
+
+CoutCascade -> CoutCascade CoutItem | CoutItem
+CoutItem -> SHL Expression | SHL STRING | SHL ENDL
+
+Condition -> Expression RelOp Expression
+RelOp -> EQ | NEQ | LT | GT | LEQ | GEQ
+
+# Math expressions (Left Recursive)
+Expression -> Expression PLUS Term \
+            | Expression MINUS Term \
+            | Term
+
+Term -> Term TIMES Factor \
+      | Term DIVIDE Factor \
+      | Factor
+
+Factor -> LPAREN Expression RPAREN \
+        | IDENTIFIER \
+        | NUMBER
