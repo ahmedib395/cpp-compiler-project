@@ -477,22 +477,16 @@ class TACExecutor:
                 if not call_stack:
                     break 
 
-                # Capture return value
-                return_value = 0
-                if len(parts) > 1:
-                    val_str = parts[1]
-                    if val_str in self.env:
-                        return_value = self.env[val_str]
-                    else:
-                        return_value = self._parse_val(val_str)
+                # 1. Capture value from the current (function) scope
+                rv = self._val(parts[1]) if len(parts) > 1 else 0
                 
-                # Restore caller scope
+                # 2. Restore caller's scope and return address
                 ret_pc, target, caller_env = call_stack.pop()
                 self.env = caller_env
                 
-                # Pass back result
+                # 3. Inject the result into the caller's environment
                 if target:
-                    self.env[target] = return_value
+                    self.env[target] = rv
                 
                 pc = ret_pc
                 continue
