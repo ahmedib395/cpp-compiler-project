@@ -46,6 +46,12 @@ class TACGenerator:
             for s in node.get("body", []):
                 self.visit(s)
 
+        elif nt == "FunctionDefinition":
+            self.emit(f"{node['name']}:")
+            for s in node.get("body", []):
+                self.visit(s)
+            self.emit("return")
+
         # ---- Declarations ----------------------------------------
         elif nt == "Declaration":
             vid = node["id"]
