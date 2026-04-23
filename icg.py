@@ -409,17 +409,40 @@ class TACExecutor:
     def run(self):
         # Build label index
         labels = {}
+        func_boundaries = [] # (start, end)
+        
         for i, instr in enumerate(self.tac):
             if instr.endswith(':') and not instr.startswith('if'):
-                labels[instr[:-1]] = i
+                name = instr[:-1]
+                labels[name] = i
+                # Find the corresponding return to know where the function ends
+                for j in range(i + 1, len(self.tac)):
+                    if self.tac[j] == "return":
+                        func_boundaries.append((i, j))
+                        break
 
         pc    = 0
         steps = 0
+        call_stack = [] # (return_pc, target_var, saved_env)
+
         while pc < len(self.tac):
             if steps > self.max_steps:
                 self.output_lines.append("[VM] Execution limit reached (possible infinite loop).")
                 break
             steps += 1
+            
+            # Skip function bodies if we are in global scope
+            if not call_stack:
+                skip = False
+                for start, end in func_boundaries:
+                    if start <= pc <= end:
+                        pc = end + 1
+                        skip = True
+                        break
+                if skip: continue
+
+            if pc >= len(self.tac): break
+            
             instr = self.tac[pc]
             parts = instr.split()
             pc   += 1
@@ -429,7 +452,8 @@ class TACExecutor:
 
             # goto L
             if parts[0] == 'goto':
-                pc = labels[parts[1]] + 1
+                if parts[1] in labels:
+                    pc = labels[parts[1]] + 1
                 continue
 
             # ifFalse cond goto L
@@ -450,7 +474,18 @@ class TACExecutor:
 
             # return [val]
             if parts[0] == 'return':
-                break
+                if call_stack:
+                    # Capture return value from function's environment BEFORE restoring caller's
+                    return_val = self._val(parts[1]) if len(parts) > 1 else 0
+                    
+                    ret_pc, target, caller_env = call_stack.pop()
+                    self.env = caller_env
+                    if target:
+                        self.env[target] = return_val
+                    pc = ret_pc
+                    continue
+                else:
+                    break
 
             # read var
             if parts[0] == 'read':
@@ -459,18 +494,22 @@ class TACExecutor:
                     raw = next(self.stdin_iter)
                     self.env[vid] = self._parse_val(str(raw))
                 except StopIteration:
-                    self.env[vid] = 0   # default if no stdin given
+                    self.env[vid] = 0
                 continue
 
             # print val
             if parts[0] == 'print':
-                rest = instr[6:]    # everything after 'print '
+                rest = instr[6:]
                 if rest == '\\n':
                     self.output_lines.append('\n')
                 elif rest.startswith('"') and rest.endswith('"'):
                     self.output_lines.append(rest[1:-1])
                 else:
                     self.output_lines.append(str(self._val(rest)))
+                continue
+
+            # param x (inside function, just placeholder)
+            if parts[0] == 'param':
                 continue
 
             # Assignment:  target = ...
@@ -480,16 +519,13 @@ class TACExecutor:
                 if len(parts) == 3:                 # t = val
                     self.env[target] = self._val(parts[2])
 
-                elif len(parts) == 4:               # t = op operand  (unary)
+                elif len(parts) == 4:               # t = op operand
                     op, operand = parts[2], parts[3]
                     v = self._val(operand)
                     if op == 'neg':
                         self.env[target] = -v
                     elif op == '!':
                         self.env[target] = int(not bool(v))
-                    elif op == 'call':
-                        # parts[2] = 'call', parts[3] = 'fname(args)'
-                        self.env[target] = self._call(parts[3])
                     else:
                         self.env[target] = v
 
@@ -499,9 +535,34 @@ class TACExecutor:
                     right = self._val(parts[4])
                     self.env[target] = self._arith(op, left, right)
 
-                elif parts[2] == 'call':            # t = call fname(a, b, ...)
-                    call_str = ' '.join(parts[3:])
-                    self.env[target] = self._call(call_str)
+                elif parts[2] == 'call':            # t = call fname(args)
+                    call_expr = ' '.join(parts[3:])
+                    if '(' in call_expr:
+                        fname = call_expr.split('(')[0].strip()
+                        args_str = call_expr.split('(', 1)[1].rsplit(')', 1)[0]
+                    else:
+                        fname = parts[3].strip()
+                        args_str = ""
+
+                    if fname in labels:
+                        args_vals = [self._val(a.strip()) for a in args_str.split(',') if a.strip()]
+                        
+                        call_stack.append((pc, target, self.env.copy()))
+                        
+                        new_env = {}
+                        f_pc = labels[fname] + 1
+                        arg_idx = 0
+                        while f_pc < len(self.tac) and self.tac[f_pc].strip().startswith('param '):
+                            pname = self.tac[f_pc].strip().split()[1]
+                            if arg_idx < len(args_vals):
+                                new_env[pname] = args_vals[arg_idx]
+                            arg_idx += 1
+                            f_pc += 1
+                        
+                        self.env = new_env
+                        pc = f_pc
+                    else:
+                        self.env[target] = self._call(call_expr)
 
                 continue
 
@@ -519,6 +580,7 @@ class TACExecutor:
             return s
 
     def _val(self, token):
+        if not token: return 0
         token = token.strip()
         if token in self.env:
             return self.env[token]
@@ -526,21 +588,25 @@ class TACExecutor:
 
     def _arith(self, op, l, r):
         try:
-            if op == '+':  return l + r
-            if op == '-':  return l - r
-            if op == '*':  return l * r
+            # Force numeric conversion
+            lv = float(l) if '.' in str(l) else int(l)
+            rv = float(r) if '.' in str(r) else int(r)
+            
+            if op == '+':  return lv + rv
+            if op == '-':  return lv - rv
+            if op == '*':  return lv * rv
             if op == '/':
-                if r == 0: return "DIV/0"
-                return int(l / r) if isinstance(l, int) and isinstance(r, int) else l / r
-            if op == '%':  return int(l) % int(r)
-            if op == '<':  return int(l < r)
-            if op == '>':  return int(l > r)
-            if op == '<=': return int(l <= r)
-            if op == '>=': return int(l >= r)
-            if op == '==': return int(l == r)
-            if op == '!=': return int(l != r)
-            if op == '&&': return int(bool(l) and bool(r))
-            if op == '||': return int(bool(l) or bool(r))
+                if rv == 0: return "DIV/0"
+                return int(lv / rv) if isinstance(lv, int) and isinstance(rv, int) else lv / rv
+            if op == '%':  return int(lv) % int(rv)
+            if op == '<':  return int(lv < rv)
+            if op == '>':  return int(lv > rv)
+            if op == '<=': return int(lv <= rv)
+            if op == '>=': return int(lv >= rv)
+            if op == '==': return int(lv == rv)
+            if op == '!=': return int(lv != rv)
+            if op == '&&': return int(bool(lv) and bool(rv))
+            if op == '||': return int(bool(lv) or bool(rv))
         except Exception:
             pass
         return 0
