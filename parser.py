@@ -60,11 +60,21 @@ RULES = [
         lambda p: node("UsingStatement", ns=p[2][1], line=p[0][2])),
 
     # Function Definitions
-    ("FunctionDef", ["RetType", "MAIN", "LPAREN", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
-        lambda p: node("MainFunction", body=p[5][1], line=p[1][2])),
+    ("FunctionDef", ["Type", "MAIN", "LPAREN", "ParamList", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
+        lambda p: node("MainFunction", params=p[3][1], body=p[6][1], line=p[1][2])),
 
-    ("FunctionDef", ["RetType", "IDENTIFIER", "LPAREN", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
-        lambda p: node("FunctionDefinition", name=p[1][1], return_type=p[0][1], body=p[5][1], line=p[1][2])),
+    ("FunctionDef", ["Type", "IDENTIFIER", "LPAREN", "ParamList", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
+        lambda p: node("FunctionDefinition", name=p[1][1], return_type=p[0][1], params=p[3][1], body=p[6][1], line=p[1][2])),
+
+    # Parameter List
+    ("ParamList",   ["ParamItems"],                 lambda p: p[0][1]),
+    ("ParamList",   [],                             lambda p: []),
+
+    ("ParamItems",  ["ParamItems", "COMMA", "Param"], lambda p: p[0][1] + [p[2][1]]),
+    ("ParamItems",  ["Param"],                      lambda p: [p[0][1]]),
+
+    ("Param",       ["Type", "IDENTIFIER"],
+        lambda p: node("Parameter", var_type=p[0][1], id=p[1][1], line=p[1][2])),
 
     # Return types
     ("RetType",     ["INT"],     lambda p: "int"),
@@ -72,8 +82,9 @@ RULES = [
     ("RetType",     ["FLOAT"],   lambda p: "float"),
     ("RetType",     ["DOUBLE"],  lambda p: "double"),
 
-    # Type (for declarations)
+    # Type (for declarations and functions)
     ("Type",        ["INT"],     lambda p: p[0][1]),
+    ("Type",        ["VOID"],    lambda p: p[0][1]),
     ("Type",        ["FLOAT"],   lambda p: p[0][1]),
     ("Type",        ["DOUBLE"],  lambda p: p[0][1]),
     ("Type",        ["CHAR"],    lambda p: p[0][1]),
