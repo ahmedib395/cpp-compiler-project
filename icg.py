@@ -101,13 +101,15 @@ class TACGenerator:
         elif nt == "ForLoop":
             self.visit(node.get("init"))
             L_start = self.new_label()
+            L_update = self.new_label()
             L_end   = self.new_label()
             self.emit(f"{L_start}:")
             cond = self.visit(node["condition"])
             self.emit(f"ifFalse {cond} goto {L_end}")
-            self.loop_stack.append((L_start, L_end))
+            self.loop_stack.append((L_update, L_end))
             for s in node.get("body", []):
                 self.visit(s)
+            self.emit(f"{L_update}:")
             self.visit(node.get("update"))
             self.loop_stack.pop()
             self.emit(f"goto {L_start}")
@@ -116,12 +118,14 @@ class TACGenerator:
         # ---- Do-While -------------------------------------------
         elif nt == "DoWhile":
             L_start = self.new_label()
+            L_cond  = self.new_label()
             L_end   = self.new_label()
             self.emit(f"{L_start}:")
-            self.loop_stack.append((L_start, L_end))
+            self.loop_stack.append((L_cond, L_end))
             for s in node.get("body", []):
                 self.visit(s)
             self.loop_stack.pop()
+            self.emit(f"{L_cond}:")
             cond = self.visit(node["condition"])
             self.emit(f"ifTrue {cond} goto {L_start}")
             self.emit(f"{L_end}:")
