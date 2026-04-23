@@ -479,7 +479,7 @@ class TACExecutor:
                     return_val = self._val(parts[1]) if len(parts) > 1 else 0
                     
                     ret_pc, target, caller_env = call_stack.pop()
-                    self.env = caller_env
+                    self.env = caller_env # Restore global scope
                     if target:
                         self.env[target] = return_val
                     pc = ret_pc
