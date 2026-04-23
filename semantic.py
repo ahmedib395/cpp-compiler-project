@@ -49,6 +49,11 @@ class SemanticAnalyzer:
             for stmt in node.get("body", []):
                 self.visit(stmt)
 
+        elif nt == "FunctionDefinition":
+            # For now, we just analyze the body of the custom function.
+            for stmt in node.get("body", []):
+                self.visit(stmt)
+
         # ---- Declarations ----------------------------------------
         elif nt == "Declaration":
             vid   = node["id"]
