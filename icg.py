@@ -474,18 +474,22 @@ class TACExecutor:
 
             # return [val]
             if parts[0] == 'return':
-                if call_stack:
-                    # Capture return value from function's environment BEFORE restoring caller's
-                    return_val = self._val(parts[1]) if len(parts) > 1 else 0
-                    
-                    ret_pc, target, caller_env = call_stack.pop()
-                    self.env = caller_env # Restore global scope
-                    if target:
-                        self.env[target] = return_val
-                    pc = ret_pc
-                    continue
-                else:
-                    break
+                if not call_stack:
+                    break # Global return ends execution
+
+                # 1. Capture value from function's environment
+                rv = self._val(parts[1]) if len(parts) > 1 else 0
+                
+                # 2. Restore caller's environment
+                ret_pc, target, caller_env = call_stack.pop()
+                self.env = caller_env
+                
+                # 3. Pass return value to target
+                if target:
+                    self.env[target] = rv
+                
+                pc = ret_pc
+                continue
 
             # read var
             if parts[0] == 'read':
@@ -547,7 +551,8 @@ class TACExecutor:
                     if fname in labels:
                         args_vals = [self._val(a.strip()) for a in args_str.split(',') if a.strip()]
                         
-                        call_stack.append((pc, target, self.env.copy()))
+                        # Save state: return PC, target variable, and CURRENT environment reference
+                        call_stack.append((pc, target, self.env))
                         
                         new_env = {}
                         f_pc = labels[fname] + 1
@@ -669,7 +674,7 @@ if __name__ == "__main__":
     print("==============================================================")
 
     # Run Executor (stdin = empty)
-    executor = TACExecutor(opt_tac)
+    executor = TACExecutor(raw_tac)
     output = executor.run()
-    print("\n===== PROGRAM OUTPUT =====")
+    print("\n===== PROGRAM OUTPUT (V2.0) =====")
     print(output if output.strip() else "(no output — program uses cin, provide stdin values)")
