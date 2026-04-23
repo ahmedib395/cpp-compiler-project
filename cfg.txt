@@ -10,8 +10,12 @@ Global -> IncludeStmt | UsingStmt | FunctionDef | Declaration | Statement
 
 IncludeStmt -> PREPROCESSOR
 UsingStmt -> USING NAMESPACE IDENTIFIER SEMI
-FunctionDef -> Type MAIN LPAREN RPAREN LBRACE StatementList RBRACE
-            | Type IDENTIFIER LPAREN RPAREN LBRACE StatementList RBRACE
+FunctionDef -> Type MAIN LPAREN ParamList RPAREN LBRACE StatementList RBRACE
+            | Type IDENTIFIER LPAREN ParamList RPAREN LBRACE StatementList RBRACE
+
+ParamList -> ParamItems | empty
+ParamItems -> ParamItems COMMA Param | Param
+Param -> Type IDENTIFIER
 
 Type -> INT | FLOAT | DOUBLE
 
