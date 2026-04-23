@@ -43,11 +43,15 @@ class TACGenerator:
 
         elif nt == "MainFunction":
             self.emit("main:")
+            for p in node.get("params", []):
+                self.emit(f"param {p['id']}")
             for s in node.get("body", []):
                 self.visit(s)
 
         elif nt == "FunctionDefinition":
             self.emit(f"{node['name']}:")
+            for p in node.get("params", []):
+                self.emit(f"param {p['id']}")
             for s in node.get("body", []):
                 self.visit(s)
             self.emit("return")
