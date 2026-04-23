@@ -7,30 +7,33 @@ class SemanticError(Exception):
 class SemanticAnalyzer:
     def __init__(self, ast):
         self.ast        = ast
-        self.symbol_table = {}   # name -> {type, const}
+        self.scopes     = [{}]   # Stack of dictionaries for scoping
         self.loop_depth = 0
 
     def analyze(self):
         self.visit(self.ast)
-        # Return a flat dict for JSON serialisation
-        return {k: v["type"] for k, v in self.symbol_table.items()}
+        # Return the global scope for the final symbol table output
+        return {k: v["type"] for k, v in self.scopes[0].items()}
 
     # ------------------------------------------------------------------
     def declare(self, var_id, var_type, line, is_const=False):
-        if var_id in self.symbol_table:
+        # Check only the current (topmost) scope for re-declaration
+        if var_id in self.scopes[-1]:
             raise SemanticError(
                 f"SEMANTIC ERROR at Line {line}: "
-                f"Variable '{var_id}' is already declared."
+                f"Variable '{var_id}' is already declared in this scope."
             )
-        self.symbol_table[var_id] = {"type": var_type, "const": is_const}
+        self.scopes[-1][var_id] = {"type": var_type, "const": is_const}
 
     def lookup(self, var_id, line):
-        if var_id not in self.symbol_table:
-            raise SemanticError(
+        # Search from the inner scope outwards
+        for scope in reversed(self.scopes):
+            if var_id in scope:
+                return scope[var_id]["type"]
+        raise SemanticError(
                 f"SEMANTIC ERROR at Line {line}: "
                 f"Variable '{var_id}' used before declaration."
             )
-        return self.symbol_table[var_id]["type"]
 
     # ------------------------------------------------------------------
     def visit(self, node):
@@ -46,13 +49,20 @@ class SemanticAnalyzer:
             pass
 
         elif nt == "MainFunction":
+            self.scopes.append({})
+            for param in node.get("params", []):
+                self.declare(param["id"], param["var_type"], param.get("line", 0))
             for stmt in node.get("body", []):
                 self.visit(stmt)
+            self.scopes.pop()
 
         elif nt == "FunctionDefinition":
-            # For now, we just analyze the body of the custom function.
+            self.scopes.append({})
+            for param in node.get("params", []):
+                self.declare(param["id"], param["var_type"], param.get("line", 0))
             for stmt in node.get("body", []):
                 self.visit(stmt)
+            self.scopes.pop()
 
         # ---- Declarations ----------------------------------------
         elif nt == "Declaration":
@@ -87,7 +97,15 @@ class SemanticAnalyzer:
             vid  = node["id"]
             line = node.get("line", 0)
             vtype = self.lookup(vid, line)
-            if self.symbol_table[vid].get("const"):
+            
+            # Check if it's const
+            is_const = False
+            for scope in reversed(self.scopes):
+                if vid in scope:
+                    is_const = scope[vid].get("const", False)
+                    break
+            
+            if is_const:
                 raise SemanticError(
                     f"SEMANTIC ERROR at Line {line}: "
                     f"Assignment to const variable '{vid}'."
