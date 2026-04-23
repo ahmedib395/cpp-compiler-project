@@ -99,6 +99,10 @@ RULES = [
     ("Stmt",        ["ReturnStmt"],        lambda p: p[0][1]),
     ("Stmt",        ["ExprStmt"],          lambda p: p[0][1]),
 
+    # Block or single statement for loops / ifs
+    ("BlockOrStmt", ["LBRACE", "StmtList", "RBRACE"], lambda p: p[1][1]),
+    ("BlockOrStmt", ["Stmt"],                         lambda p: [p[0][1]]),
+
     # --- Declarations ---
     # int x;
     ("DeclStmt",    ["Type", "IDENTIFIER", "SEMI"],
@@ -140,12 +144,12 @@ RULES = [
         lambda p: node("IncrDecr", id=p[0][1], op="--", line=p[0][2])),
 
     # --- Loops ---
-    ("WhileLoop",   ["WHILE", "LPAREN", "Condition", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
-        lambda p: node("WhileLoop", condition=p[2][1], body=p[5][1], line=p[0][2])),
+    ("WhileLoop",   ["WHILE", "LPAREN", "Condition", "RPAREN", "BlockOrStmt"],
+        lambda p: node("WhileLoop", condition=p[2][1], body=p[4][1], line=p[0][2])),
 
-    # for (init; cond; update) { body }
-    ("ForLoop",     ["FOR", "LPAREN", "ForInit", "Condition", "SEMI", "ForUpdate", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
-        lambda p: node("ForLoop", init=p[2][1], condition=p[3][1], update=p[5][1], body=p[8][1], line=p[0][2])),
+    # for (init; cond; update) { body } or for (...) stmt
+    ("ForLoop",     ["FOR", "LPAREN", "ForInit", "Condition", "SEMI", "ForUpdate", "RPAREN", "BlockOrStmt"],
+        lambda p: node("ForLoop", init=p[2][1], condition=p[3][1], update=p[5][1], body=p[7][1], line=p[0][2])),
 
     ("ForInit",     ["Type", "IDENTIFIER", "ASSIGN", "Expr", "SEMI"],
         lambda p: node("Declaration", var_type=p[0][1], id=p[1][1], value=p[3][1], line=p[1][2])),
@@ -166,17 +170,17 @@ RULES = [
     ("ForUpdate",   [],  lambda p: None),
 
     # do { } while ();
-    ("DoWhile",     ["DO", "LBRACE", "StmtList", "RBRACE", "WHILE", "LPAREN", "Condition", "RPAREN", "SEMI"],
-        lambda p: node("DoWhile", body=p[2][1], condition=p[6][1], line=p[0][2])),
+    ("DoWhile",     ["DO", "BlockOrStmt", "WHILE", "LPAREN", "Condition", "RPAREN", "SEMI"],
+        lambda p: node("DoWhile", body=p[1][1], condition=p[4][1], line=p[0][2])),
 
     # --- If / Else ---
-    ("IfStmt",      ["IF", "LPAREN", "Condition", "RPAREN", "LBRACE", "StmtList", "RBRACE", "ElseChain"],
-        lambda p: node("IfStatement", condition=p[2][1], body=p[5][1], else_body=p[7][1], line=p[0][2])),
+    ("IfStmt",      ["IF", "LPAREN", "Condition", "RPAREN", "BlockOrStmt", "ElseChain"],
+        lambda p: node("IfStatement", condition=p[2][1], body=p[4][1], else_body=p[5][1], line=p[0][2])),
 
-    ("ElseChain",   ["ELSE", "IF", "LPAREN", "Condition", "RPAREN", "LBRACE", "StmtList", "RBRACE", "ElseChain"],
-        lambda p: [node("IfStatement", condition=p[3][1], body=p[6][1], else_body=p[8][1], line=p[1][2])]),
-    ("ElseChain",   ["ELSE", "LBRACE", "StmtList", "RBRACE"],
-        lambda p: p[2][1]),
+    ("ElseChain",   ["ELSE", "IF", "LPAREN", "Condition", "RPAREN", "BlockOrStmt", "ElseChain"],
+        lambda p: [node("IfStatement", condition=p[3][1], body=p[5][1], else_body=p[6][1], line=p[1][2])]),
+    ("ElseChain",   ["ELSE", "BlockOrStmt"],
+        lambda p: p[1][1]),
     ("ElseChain",   [],  lambda p: None),
 
     # --- Jump statements ---
