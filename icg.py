@@ -516,11 +516,47 @@ class TACExecutor:
             if parts[0] == 'param':
                 continue
 
-            # Assignment:  target = ...
+            # Assignment: target = ...
             if len(parts) >= 3 and parts[1] == '=':
                 target = parts[0]
 
-                if len(parts) == 3:                 # t = val
+                # function call must be checked FIRST
+                if parts[2] == 'call':              # t = call fname(args)
+                    call_expr = instr.split('=', 1)[1].strip()   # "call add(3, 3)"
+                    call_expr = call_expr[len("call "):].strip() # "add(3, 3)"
+
+                    if '(' in call_expr:
+                        fname = call_expr.split('(')[0].strip()
+                        args_str = call_expr.split('(', 1)[1].rsplit(')', 1)[0]
+                    else:
+                        fname = call_expr.strip()
+                        args_str = ""
+
+                    if fname in labels:
+                        args_vals = []
+                        for arg in args_str.split(','):
+                            clean_arg = arg.strip()
+                            if clean_arg:
+                                args_vals.append(self._val(clean_arg))
+
+                        call_stack.append((pc, target, self.env.copy()))
+
+                        new_env = {}
+                        f_pc = labels[fname] + 1
+                        arg_idx = 0
+                        while f_pc < len(self.tac) and self.tac[f_pc].strip().startswith('param '):
+                            pname = self.tac[f_pc].strip().split()[1]
+                            if arg_idx < len(args_vals):
+                                new_env[pname] = args_vals[arg_idx]
+                            arg_idx += 1
+                            f_pc += 1
+
+                        self.env = new_env
+                        pc = f_pc
+                    else:
+                        self.env[target] = 0
+
+                elif len(parts) == 3:               # t = val
                     self.env[target] = self._val(parts[2])
 
                 elif len(parts) == 4:               # t = op operand
@@ -538,41 +574,6 @@ class TACExecutor:
                     op    = parts[3]
                     right = self._val(parts[4])
                     self.env[target] = self._arith(op, left, right)
-
-                elif parts[2] == 'call':            # t = call fname(args)
-                    call_expr = ' '.join(parts[3:])
-                    if '(' in call_expr:
-                        fname = call_expr.split('(')[0].strip()
-                        args_str = call_expr.split('(', 1)[1].rsplit(')', 1)[0]
-                    else:
-                        fname = parts[3].strip()
-                        args_str = ""
-
-                    if fname in labels:
-                        # Cleanly extract and parse arguments
-                        args_vals = []
-                        for arg in args_str.split(','):
-                            clean_arg = arg.strip()
-                            if clean_arg:
-                                args_vals.append(self._val(clean_arg))
-                        
-                        # Save state: return PC, target variable, and CURRENT environment reference
-                        call_stack.append((pc, target, self.env))
-                        
-                        new_env = {}
-                        f_pc = labels[fname] + 1
-                        arg_idx = 0
-                        while f_pc < len(self.tac) and self.tac[f_pc].strip().startswith('param '):
-                            pname = self.tac[f_pc].strip().split()[1]
-                            if arg_idx < len(args_vals):
-                                new_env[pname] = args_vals[arg_idx]
-                            arg_idx += 1
-                            f_pc += 1
-                        
-                        self.env = new_env
-                        pc = f_pc
-                    else:
-                        self.env[target] = self._call(call_expr)
 
                 continue
 
@@ -679,7 +680,7 @@ if __name__ == "__main__":
     print("==============================================================")
 
     # Run Executor (stdin = empty)
-    executor = TACExecutor(raw_tac)
+    executor = TACExecutor(opt_tac)
     output = executor.run()
     print("\n===== PROGRAM OUTPUT (V2.0) =====")
     print(output if output.strip() else "(no output — program uses cin, provide stdin values)")
