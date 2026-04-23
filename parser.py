@@ -49,6 +49,7 @@ RULES = [
     ("Global",      ["IncludeStmt"],                lambda p: p[0][1]),
     ("Global",      ["UsingStmt"],                  lambda p: p[0][1]),
     ("Global",      ["FunctionDef"],                lambda p: p[0][1]),
+    ("Global",      ["Stmt"],                       lambda p: p[0][1]),
 
     # #include
     ("IncludeStmt", ["PREPROCESSOR"],
@@ -58,9 +59,12 @@ RULES = [
     ("UsingStmt",   ["USING", "NAMESPACE", "STD", "SEMI"],
         lambda p: node("UsingStatement", ns=p[2][1], line=p[0][2])),
 
-    # int main() { ... }
+    # Function Definitions
     ("FunctionDef", ["RetType", "MAIN", "LPAREN", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
         lambda p: node("MainFunction", body=p[5][1], line=p[1][2])),
+
+    ("FunctionDef", ["RetType", "IDENTIFIER", "LPAREN", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
+        lambda p: node("FunctionDefinition", name=p[1][1], return_type=p[0][1], body=p[5][1], line=p[1][2])),
 
     # Return types
     ("RetType",     ["INT"],     lambda p: "int"),
