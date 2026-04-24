@@ -320,11 +320,21 @@ class TACOptimizer:
                 consts.clear()
                 continue
 
-            # read / print / return / call
-            if parts[0] in ('read', 'print', 'return', 'call', 'main:'):
-                self.optimized.append(instr)
+            # read / print / return / call / labels
+            if parts[0] in ('read', 'print', 'return', 'call', 'main:') or instr.endswith(':'):
+                if parts[0] in ('print', 'return') and len(parts) > 1:
+                    val = parts[1]
+                    resolved = consts.get(val, val)
+                    self.optimized.append(f"{parts[0]} {resolved}")
+                else:
+                    self.optimized.append(instr)
+                
                 if parts[0] == 'read' and len(parts) > 1:
                     consts.pop(parts[1], None)
+                
+                # If it's a label or jump-related, clear constants to stay safe
+                if instr.endswith(':') or parts[0] in ('call', 'read'):
+                    consts.clear()
                 continue
 
             # Assignment:  target = ...
