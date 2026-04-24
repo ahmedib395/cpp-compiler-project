@@ -6,14 +6,15 @@ class SemanticError(Exception):
 
 class SemanticAnalyzer:
     def __init__(self, ast):
-        self.ast        = ast
-        self.scopes     = [{}]   # Stack of dictionaries for scoping
-        self.loop_depth = 0
+        self.ast         = ast
+        self.scopes      = [{}]   # Stack of dictionaries for scoping
+        self.all_symbols = {}     # FLAT symbol table for UI output
+        self.loop_depth  = 0
 
     def analyze(self):
         self.visit(self.ast)
-        # Return the global scope for the final symbol table output
-        return {k: v["type"] for k, v in self.scopes[0].items()}
+        # Return all symbols collected during the scan
+        return self.all_symbols
 
     # ------------------------------------------------------------------
     def declare(self, var_id, var_type, line, is_const=False):
@@ -24,6 +25,8 @@ class SemanticAnalyzer:
                 f"Variable '{var_id}' is already declared in this scope."
             )
         self.scopes[-1][var_id] = {"type": var_type, "const": is_const}
+        # Also add to the flat table for UI visualization
+        self.all_symbols[var_id] = var_type
 
     def lookup(self, var_id, line):
         # Search from the inner scope outwards
