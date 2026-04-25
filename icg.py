@@ -257,14 +257,11 @@ class TACOptimizer:
     def _num(s):
         if isinstance(s, (int, float)):
             return s
+
         try:
-            # Only try int() if it's a clean integer string
-            if isinstance(s, str) and '.' not in s:
-                return int(s)
-        except (ValueError, TypeError):
-            pass
-        try:
-            return float(s)
+            if "." in str(s):
+                return float(s)
+            return int(s)
         except (ValueError, TypeError):
             return None
 
@@ -275,18 +272,15 @@ class TACOptimizer:
             if op == '-':  return l - r
             if op == '*':  return l * r
             if op == '/':  return l / r if r != 0 else None
-            if op == '%':  return float(l) % float(r)
-            if op == '<':  return 1 if l < r else 0
-            if op == '>':  return 1 if l > r else 0
-            if op == '<=': return 1 if l <= r else 0
-            if op == '>=': return 1 if l >= r else 0
-            if op == '==': return 1 if l == r else 0
-            if op == '!=': return 1 if l != r else 0
-            if op == '&&': return 1 if bool(l) and bool(r) else 0
-            if op == '||': return 1 if bool(l) or bool(r) else 0
+            if op == '%':  return l % r
+            if op == '<':  return int(l < r)
+            if op == '>':  return int(l > r)
+            if op == '<=': return int(l <= r)
+            if op == '>=': return int(l >= r)
+            if op == '==': return int(l == r)
+            if op == '!=': return int(l != r)
         except Exception:
-            pass
-        return None
+            return None
 
     def optimize(self):
         consts = {}
