@@ -713,7 +713,7 @@ int main() {
             currentCode = editor.getValue();
 
             try {
-                const resp = await fetch('http://localhost:8000/compile', {
+                const resp = await fetch('/compile', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ code: currentCode })
@@ -808,7 +808,7 @@ int main() {
         async function runProgram(stdinValues) {
             termWriteLn('\n--- Program Output ---', 'c-info');
             try {
-                const resp = await fetch('http://localhost:8000/run', {
+                const resp = await fetch('/run', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ code: currentCode, stdin: stdinValues })
