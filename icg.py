@@ -367,8 +367,6 @@ class TACOptimizer:
                         else:
                             res = None
                         if res is not None:
-                            if isinstance(res, float) and res.is_integer():
-                                res = int(res)
                             self.optimized.append(f"{target} = {res}")
                             consts[target] = res
                             continue
@@ -383,8 +381,6 @@ class TACOptimizer:
                     if nl is not None and nr is not None:
                         res = self._eval(op, nl, nr)
                         if res is not None:
-                            if isinstance(res, float) and res.is_integer():
-                                res = int(res)
                             self.optimized.append(f"{target} = {res}")
                             consts[target] = res
                             continue
