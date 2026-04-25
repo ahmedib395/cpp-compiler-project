@@ -603,16 +603,13 @@ class TACExecutor:
 
     def _arith(self, op, l, r):
         try:
-            # Force numeric conversion
             lv = float(l)
             rv = float(r)
             
             if op == '+':  res = lv + rv
             elif op == '-':  res = lv - rv
             elif op == '*':  res = lv * rv
-            elif op == '/':
-                if rv == 0: return "DIV/0"
-                res = lv / rv
+            elif op == '/':  res = lv / rv if rv != 0 else "DIV/0"
             elif op == '%':  res = lv % rv
             elif op == '<':  res = 1 if lv < rv else 0
             elif op == '>':  res = 1 if lv > rv else 0
@@ -620,15 +617,15 @@ class TACExecutor:
             elif op == '>=': res = 1 if lv >= rv else 0
             elif op == '==': res = 1 if lv == rv else 0
             elif op == '!=': res = 1 if lv != rv else 0
-            elif op == '&&': res = 1 if bool(lv) and bool(rv) else 0
-            elif op == '||': res = 1 if bool(lv) or bool(rv) else 0
+            elif op == '&&': res = 1 if lv and rv else 0
+            elif op == '||': res = 1 if lv or rv else 0
             else: res = 0
 
-            # If it's effectively an integer (like 15.0), return as int
+            # Smart conversion: 6.0 -> 6, but 15.5 stays 15.5
             if isinstance(res, float) and res.is_integer():
                 return int(res)
             return res
-        except Exception:
+        except:
             pass
         return 0
 
@@ -690,7 +687,7 @@ if __name__ == "__main__":
     print("==============================================================")
 
     # Run Executor (stdin = empty)
-    executor = TACExecutor(opt_tac)
+    executor = TACExecutor(raw_tac)
     output = executor.run()
     print("\n===== PROGRAM OUTPUT (V2.0) =====")
     print(output if output.strip() else "(no output — program uses cin, provide stdin values)")
