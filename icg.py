@@ -255,8 +255,12 @@ class TACOptimizer:
 
     @staticmethod
     def _num(s):
+        if isinstance(s, (int, float)):
+            return s
         try:
-            return int(s)
+            # Only try int() if it's a clean integer string
+            if isinstance(s, str) and '.' not in s:
+                return int(s)
         except (ValueError, TypeError):
             pass
         try:
@@ -271,15 +275,15 @@ class TACOptimizer:
             if op == '-':  return l - r
             if op == '*':  return l * r
             if op == '/':  return l / r if r != 0 else None
-            if op == '%':  return int(l) % int(r)
-            if op == '<':  return int(l < r)
-            if op == '>':  return int(l > r)
-            if op == '<=': return int(l <= r)
-            if op == '>=': return int(l >= r)
-            if op == '==': return int(l == r)
-            if op == '!=': return int(l != r)
-            if op == '&&': return int(bool(l) and bool(r))
-            if op == '||': return int(bool(l) or bool(r))
+            if op == '%':  return float(l) % float(r)
+            if op == '<':  return 1 if l < r else 0
+            if op == '>':  return 1 if l > r else 0
+            if op == '<=': return 1 if l <= r else 0
+            if op == '>=': return 1 if l >= r else 0
+            if op == '==': return 1 if l == r else 0
+            if op == '!=': return 1 if l != r else 0
+            if op == '&&': return 1 if bool(l) and bool(r) else 0
+            if op == '||': return 1 if bool(l) or bool(r) else 0
         except Exception:
             pass
         return None
@@ -610,24 +614,30 @@ class TACExecutor:
     def _arith(self, op, l, r):
         try:
             # Force numeric conversion
-            lv = float(l) if '.' in str(l) else int(l)
-            rv = float(r) if '.' in str(r) else int(r)
+            lv = float(l)
+            rv = float(r)
             
-            if op == '+':  return lv + rv
-            if op == '-':  return lv - rv
-            if op == '*':  return lv * rv
-            if op == '/':
+            if op == '+':  res = lv + rv
+            elif op == '-':  res = lv - rv
+            elif op == '*':  res = lv * rv
+            elif op == '/':
                 if rv == 0: return "DIV/0"
-                return int(lv / rv) if isinstance(lv, int) and isinstance(rv, int) else lv / rv
-            if op == '%':  return int(lv) % int(rv)
-            if op == '<':  return int(lv < rv)
-            if op == '>':  return int(lv > rv)
-            if op == '<=': return int(lv <= rv)
-            if op == '>=': return int(lv >= rv)
-            if op == '==': return int(lv == rv)
-            if op == '!=': return int(lv != rv)
-            if op == '&&': return int(bool(lv) and bool(rv))
-            if op == '||': return int(bool(lv) or bool(rv))
+                res = lv / rv
+            elif op == '%':  res = lv % rv
+            elif op == '<':  res = 1 if lv < rv else 0
+            elif op == '>':  res = 1 if lv > rv else 0
+            elif op == '<=': res = 1 if lv <= rv else 0
+            elif op == '>=': res = 1 if lv >= rv else 0
+            elif op == '==': res = 1 if lv == rv else 0
+            elif op == '!=': res = 1 if lv != rv else 0
+            elif op == '&&': res = 1 if bool(lv) and bool(rv) else 0
+            elif op == '||': res = 1 if bool(lv) or bool(rv) else 0
+            else: res = 0
+
+            # If it's effectively an integer (like 15.0), return as int
+            if isinstance(res, float) and res.is_integer():
+                return int(res)
+            return res
         except Exception:
             pass
         return 0
