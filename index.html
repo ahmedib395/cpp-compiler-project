@@ -526,22 +526,6 @@
 using namespace std;
 
 int main() {
-    int a;
-    int b;
-    cin &gt;&gt; a &gt;&gt; b;
-
-    int sum = a + b;
-    cout &lt;&lt; "Sum: " &lt;&lt; sum &lt;&lt; endl;
-
-    int limit = 10;
-    while (a &lt; limit) {
-        a = a + 1;
-        if (a == 5) {
-            continue;
-        }
-    }
-
-    cout &lt;&lt; "Final a: " &lt;&lt; a &lt;&lt; endl;
     return 0;
 }</textarea>
         </div>
@@ -729,7 +713,7 @@ int main() {
             currentCode = editor.getValue();
 
             try {
-                const resp = await fetch('/compile', {
+                const resp = await fetch('http://localhost:8000/compile', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ code: currentCode })
@@ -824,7 +808,7 @@ int main() {
         async function runProgram(stdinValues) {
             termWriteLn('\n--- Program Output ---', 'c-info');
             try {
-                const resp = await fetch('/run', {
+                const resp = await fetch('http://localhost:8000/run', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ code: currentCode, stdin: stdinValues })
