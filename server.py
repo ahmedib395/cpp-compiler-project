@@ -147,7 +147,7 @@ class CompilerHTTPRequestHandler(BaseHTTPRequestHandler):
                 except ValueError: pass
                 parsed.append(s)
 
-            executor = TACExecutor(opt_tac, stdin_values=parsed)
+           executor = TACExecutor(raw_tac, stdin_values=parsed)
             output   = executor.run()
             response["program_output"] = output if output.strip() else "(no output)"
         except Exception as e:
