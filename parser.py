@@ -60,17 +60,16 @@ class Parser:
                 if isinstance(n, CSTNode):
                     str_form.append(n.lhs)
                 elif n == "empty":
-                    continue # Don't print empty
+                    str_form.append("ε") # Greek letter Epsilon for empty
                 else:
-                    # Print the literal string value instead of the ALL CAPS token name
-                    str_form.append(str(n[1]))
+                    str_form.append(n[0]) # Terminal token type (e.g. PREPROCESSOR)
                     
             prefix = "=> " if steps else ""
             steps.append(prefix + " ".join(str_form))
             
-            # Find LEFT-MOST CSTNode (Standard Top-Down Expansion)
+            # Find RIGHT-MOST CSTNode (Strict Right-Most Derivation)
             idx = -1
-            for i in range(len(current_sentential)):
+            for i in range(len(current_sentential)-1, -1, -1):
                 if isinstance(current_sentential[i], CSTNode):
                     idx = i
                     break
@@ -116,19 +115,22 @@ class Parser:
 
     def parse_GlobalList(self):
         ast_list = []
-        globals_cst = []
+        cst_list = []
         
         while self.peek() in ('INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'VOID', 'CONST'):
             g_ast, g_cst = self.parse_Global()
             ast_list.append(g_ast)
-            globals_cst.append(g_cst)
             
-        # Build right-associative CST: GlobalList -> Global GlobalList | empty
-        curr_cst = CSTNode("GlobalList", ["empty"])
-        for g_cst in reversed(globals_cst):
-            curr_cst = CSTNode("GlobalList", [g_cst, curr_cst])
+            # Left recursion flattening for CST: GlobalList -> GlobalList Global
+            if not cst_list:
+                cst_list = [CSTNode("GlobalList", ["empty"]), g_cst]
+            else:
+                cst_list = [CSTNode("GlobalList", cst_list), g_cst]
+                
+        if not cst_list:
+            cst_list = ["empty"]
             
-        return ast_list, curr_cst
+        return ast_list, CSTNode("GlobalList", cst_list) if isinstance(cst_list, list) else cst_list
 
     def parse_Global(self):
         # Could be FunctionDef or Declaration (both start with Type)
@@ -211,26 +213,32 @@ class Parser:
     def parse_Type(self):
         if self.peek() == 'CONST':
             self.match('CONST')
-            t_val, _ = self.match(self.peek()) # INT, FLOAT, etc
-            return f"const {t_val.lower()}", CSTNode("Type", [('CONST', 'const'), (self.current_token[0], t_val)])
+            t_tok = self.peek()
+            t_val, _ = self.match(t_tok)
+            return f"const {t_val.lower()}", CSTNode("Type", [('CONST', 'const'), (t_tok, t_val)])
         else:
-            t_val, _ = self.match(self.peek())
-            return t_val.lower(), CSTNode("Type", [(self.current_token[0], t_val)])
+            t_tok = self.peek()
+            t_val, _ = self.match(t_tok)
+            return t_val.lower(), CSTNode("Type", [(t_tok, t_val)])
 
     def parse_StatementList(self):
         ast_list = []
-        stmt_cst_list = []
+        cst_list = []
         
         while self.peek() not in ('RBRACE', 'EOF', '$'):
             s_ast, s_cst = self.parse_Statement()
             ast_list.append(s_ast)
-            stmt_cst_list.append(s_cst)
             
-        curr_cst = CSTNode("StatementList", ["empty"])
-        for s_cst in reversed(stmt_cst_list):
-            curr_cst = CSTNode("StatementList", [s_cst, curr_cst])
+            # Left recursion flattening for CST: StatementList -> StatementList Statement
+            if not cst_list:
+                cst_list = [CSTNode("StatementList", ["empty"]), s_cst]
+            else:
+                cst_list = [CSTNode("StatementList", cst_list), s_cst]
+                
+        if not cst_list:
+            cst_list = ["empty"]
             
-        return ast_list, curr_cst
+        return ast_list, CSTNode("StatementList", cst_list) if isinstance(cst_list, list) else cst_list
 
     def parse_Statement(self):
         if self.peek() in ('INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'VOID', 'CONST'):
