@@ -116,7 +116,7 @@ def get_display_type(internal_kind):
 
 # Dictionary of reserved words to their token types
 KEYWORDS = {
-    'using': 'USING', 'namespace': 'NAMESPACE', 'std': 'STD',
+    'using': 'USING', 'namespace': 'NAMESPACE',
     'void': 'VOID', 'int': 'INT', 'float': 'FLOAT', 'double': 'DOUBLE',
     'char': 'CHAR', 'bool': 'BOOL', 'true': 'TRUE', 'false': 'FALSE',
     'const': 'CONST', 'for': 'FOR', 'if': 'IF', 'else': 'ELSE',
