@@ -75,12 +75,12 @@ class CompilerHTTPRequestHandler(BaseHTTPRequestHandler):
 
         # Phase 2 — Syntax
         try:
-            ast = parser.parse(tokens)
-            response["console"] += "[2/4] Syntax Analysis (SLR-1):   PASS\n"
-            response["ast"]      = json.dumps(ast, indent=4)
+            ast, derivation = parser.parse(tokens)
+            response["console"] += "[2/4] Top-Down Expansion (Parser):   PASS\n"
+            response["ast"]      = "--- RIGHT-MOST DERIVATION STEPS (From Top-Down CST) ---\n" + "\n".join(derivation) + "\n\n--- ABSTRACT SYNTAX TREE ---\n" + json.dumps(ast, indent=4)
         except parser.SyntaxErrorExt as e:
             response.update({"success": False, "error_phase": 2,
-                             "console": response["console"] + f"[2/4] Syntax Analysis (SLR-1):   FAILED\n{e}\n",
+                             "console": response["console"] + f"[2/4] Top-Down Expansion (Parser):   FAILED\n{e}\n",
                              "ast": f"ERROR:\n{e}"})
             self._send_json(response); return
 
@@ -132,7 +132,7 @@ class CompilerHTTPRequestHandler(BaseHTTPRequestHandler):
             stdin_values = req.get('stdin', [])
 
             tokens  = lexer.lex(code)
-            ast     = parser.parse(tokens)
+            ast, _     = parser.parse(tokens)
             SemanticAnalyzer(ast).analyze()
             raw_tac = TACGenerator(ast).generate()
             opt_tac = TACOptimizer(raw_tac).optimize()
