@@ -77,7 +77,8 @@ class CompilerHTTPRequestHandler(BaseHTTPRequestHandler):
         try:
             ast, derivation = parser.parse(tokens)
             response["console"] += "[2/4] Top-Down Expansion (Parser):   PASS\n"
-            response["ast"]      = "--- RIGHT-MOST DERIVATION STEPS (From Top-Down CST) ---\n" + "\n".join(derivation) + "\n\n--- ABSTRACT SYNTAX TREE ---\n" + json.dumps(ast, indent=4)
+            barrier = "\n\n" + "="*70 + "\n" + " "*24 + "ABSTRACT SYNTAX TREE\n" + "="*70 + "\n\n"
+            response["ast"]      = "--- TOP-DOWN EXPANSION (RIGHT-MOST DERIVATION STEPS) ---\n\n" + "\n\n".join(derivation) + barrier + json.dumps(ast, indent=4)
         except parser.SyntaxErrorExt as e:
             response.update({"success": False, "error_phase": 2,
                              "console": response["console"] + f"[2/4] Top-Down Expansion (Parser):   FAILED\n{e}\n",
