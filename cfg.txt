@@ -1,64 +1,91 @@
 # Context Free Grammar (CFG) for Phase 1 - 4
-# Right-Most Derivation manually constructed.
+# Top-Down Parser (Recursive Descent Expansion)
 # Uses exact terminal token types matched in lexer.py.
 
-Program -> GlobalList
+Program -> IncludeStmt UsingStmt GlobalList
 
-# Left Recursion for lists (Excellent for Bottom-Up SLR)
-GlobalList -> GlobalList Global | empty
-Global -> IncludeStmt | UsingStmt | FunctionDef | Declaration | Statement
-
+# Mandatory Boilerplate
 IncludeStmt -> PREPROCESSOR
 UsingStmt -> USING NAMESPACE IDENTIFIER SEMI
-FunctionDef -> Type MAIN LPAREN ParamList RPAREN LBRACE StatementList RBRACE
-            | Type IDENTIFIER LPAREN ParamList RPAREN LBRACE StatementList RBRACE
 
-ParamList -> ParamItems | empty
-ParamItems -> ParamItems COMMA Param | Param
+# List of global entities (EBNF repetition for Top-Down parsing)
+GlobalList -> { Global }
+Global -> FunctionDef | Declaration | Statement
+
+FunctionDef -> Type MAIN LPAREN ParamList RPAREN LBRACE StatementList RBRACE
+             | Type IDENTIFIER LPAREN ParamList RPAREN LBRACE StatementList RBRACE
+
+ParamList -> Param { COMMA Param } | empty
 Param -> Type IDENTIFIER
 
-Type -> INT | FLOAT | DOUBLE
+Type -> INT | FLOAT | DOUBLE | CHAR | BOOL | VOID | CONST INT | CONST FLOAT | CONST DOUBLE
 
-StatementList -> StatementList Statement | empty
+StatementList -> { Statement }
 Statement -> Declaration \
            | Assignment \
            | WhileLoop \
+           | ForLoop \
+           | DoWhile \
            | IfStatement \
            | BreakStmt \
            | ContinueStmt \
            | CinStmt \
            | CoutStmt \
-           | ReturnStmt
+           | ReturnStmt \
+           | Expression SEMI
 
-Declaration -> Type IDENTIFIER SEMI | Type IDENTIFIER ASSIGN Expression SEMI
-Assignment -> IDENTIFIER ASSIGN Expression SEMI
+Declaration -> Type IDENTIFIER SEMI | Type IDENTIFIER ASSIGN Expression SEMI | Type VarList SEMI
+VarList -> VarItem { COMMA VarItem }
+VarItem -> IDENTIFIER | IDENTIFIER ASSIGN Expression
 
-WhileLoop -> WHILE LPAREN Condition RPAREN LBRACE StatementList RBRACE
-IfStatement -> IF LPAREN Condition RPAREN LBRACE StatementList RBRACE ElsePart
-ElsePart -> ELSE LBRACE StatementList RBRACE | empty
+Assignment -> IDENTIFIER ASSIGN Expression SEMI \
+            | IDENTIFIER PLUS_ASSIGN Expression SEMI \
+            | IDENTIFIER MINUS_ASSIGN Expression SEMI \
+            | IDENTIFIER TIMES_ASSIGN Expression SEMI \
+            | IDENTIFIER DIV_ASSIGN Expression SEMI \
+            | IDENTIFIER INC SEMI \
+            | IDENTIFIER DEC SEMI
+
+WhileLoop -> WHILE LPAREN Condition RPAREN BlockOrStmt
+ForLoop -> FOR LPAREN ForInit Condition SEMI ForUpdate RPAREN BlockOrStmt
+ForInit -> Type IDENTIFIER ASSIGN Expression SEMI | IDENTIFIER ASSIGN Expression SEMI | SEMI
+ForUpdate -> IDENTIFIER INC | IDENTIFIER DEC | IDENTIFIER ASSIGN Expression | IDENTIFIER PLUS_ASSIGN Expression | IDENTIFIER MINUS_ASSIGN Expression | empty
+DoWhile -> DO BlockOrStmt WHILE LPAREN Condition RPAREN SEMI
+
+IfStatement -> IF LPAREN Condition RPAREN BlockOrStmt ElsePart
+ElsePart -> ELSE IF LPAREN Condition RPAREN BlockOrStmt ElsePart \
+          | ELSE BlockOrStmt \
+          | empty
+
+BlockOrStmt -> LBRACE StatementList RBRACE | Statement
 
 BreakStmt -> BREAK SEMI
 ContinueStmt -> CONTINUE SEMI
 ReturnStmt -> RETURN Expression SEMI | RETURN SEMI
 
-CinStmt -> CIN SHR IDENTIFIER SEMI
-CoutStmt -> COUT CoutCascade SEMI
+CinStmt -> CIN { SHR IDENTIFIER } SEMI
+CoutStmt -> COUT { SHL CoutAtom } SEMI
+CoutAtom -> Expression | STRING | ENDL
 
-CoutCascade -> CoutCascade CoutItem | CoutItem
-CoutItem -> SHL Expression | SHL STRING | SHL ENDL
+Condition -> AndCond { OR AndCond }
+AndCond -> CondAtom { AND CondAtom }
+CondAtom -> NOT CondAtom | Expression RelOp Expression | Expression
 
-Condition -> Expression RelOp Expression
 RelOp -> EQ | NEQ | LT | GT | LEQ | GEQ
 
-# Math expressions (Left Recursive)
-Expression -> Expression PLUS Term \
-            | Expression MINUS Term \
-            | Term
-
-Term -> Term TIMES Factor \
-      | Term DIVIDE Factor \
-      | Factor
+# Math expressions (Top-Down precedence levels)
+Expression -> Term { (PLUS | MINUS) Term }
+Term -> Unary { (TIMES | DIVIDE | MOD) Unary }
+Unary -> MINUS Factor | NOT Factor | Factor
 
 Factor -> LPAREN Expression RPAREN \
+        | IDENTIFIER LPAREN ArgList RPAREN \
         | IDENTIFIER \
-        | NUMBER
+        | NUMBER \
+        | FLOAT_NUM \
+        | STRING \
+        | CHAR_LIT \
+        | TRUE \
+        | FALSE
+
+ArgList -> Expression { COMMA Expression } | empty
