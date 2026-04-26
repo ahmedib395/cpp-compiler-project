@@ -52,6 +52,17 @@ class Parser:
     def generate_rmd(self, cst_root):
         steps = []
         current_sentential = [cst_root]
+        step_counter = 1
+        
+        # Gather all actual literal values for the "Final:" step
+        final_literals = []
+        def gather_terminals(node):
+            if isinstance(node, CSTNode):
+                for child in node.rhs_symbols:
+                    gather_terminals(child)
+            elif node != "empty":
+                final_literals.append(str(node[1]))
+        gather_terminals(cst_root)
         
         while True:
             # Format current sentential form
@@ -60,12 +71,20 @@ class Parser:
                 if isinstance(n, CSTNode):
                     str_form.append(n.lhs)
                 elif n == "empty":
-                    str_form.append("ε") # Greek letter Epsilon for empty
+                    continue # Skip empty entirely
                 else:
-                    str_form.append(n[0]) # Terminal token type (e.g. PREPROCESSOR)
-                    
-            prefix = "=> " if steps else ""
-            steps.append(prefix + " ".join(str_form))
+                    # Token type name
+                    str_form.append(str(n[0]))
+            
+            # Remove extra spaces if list is empty
+            form_str = " ".join(str_form).strip()
+            
+            if step_counter == 1:
+                steps.append(f"Step {step_counter}:\n{cst_root.lhs} -> {form_str}")
+            else:
+                steps.append(f"Step {step_counter}:\n-> {form_str}")
+                
+            step_counter += 1
             
             # Find RIGHT-MOST CSTNode (Strict Right-Most Derivation)
             idx = -1
@@ -81,10 +100,9 @@ class Parser:
             rhs = node_to_expand.rhs_symbols
             if not rhs:
                 rhs = ["empty"]
-            if not isinstance(rhs, list):
-                print(f"DEBUG ERROR: lhs={node_to_expand.lhs}, rhs is {type(rhs)}: {rhs}")
             current_sentential = current_sentential[:idx] + rhs + current_sentential[idx+1:]
             
+        steps.append(f"Final:\n-> {' '.join(final_literals)}\n\nVALID")
         return steps
 
     # --- Grammar Rules ---
