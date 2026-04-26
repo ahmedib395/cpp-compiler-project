@@ -93,10 +93,10 @@ class Parser:
     def parse_Program(self):
         inc_ast, inc_cst = self.parse_IncludeStmt()
         use_ast, use_cst = self.parse_UsingStmt()
-        gl_ast, gl_cst_list = self.parse_GlobalList()
+        gl_ast, gl_cst = self.parse_GlobalList()
         
         ast = node("Program", body=[inc_ast, use_ast] + gl_ast)
-        cst = CSTNode("Program", [inc_cst, use_cst, CSTNode("GlobalList", gl_cst_list)])
+        cst = CSTNode("Program", [inc_cst, use_cst, gl_cst])
         return ast, cst
 
     def parse_IncludeStmt(self):
@@ -180,7 +180,7 @@ class Parser:
             typ_cst, 
             ('MAIN' if name == 'main' else 'IDENTIFIER', name), 
             ('LPAREN', '('), p_cst, ('RPAREN', ')'), 
-            ('LBRACE', '{'), CSTNode("StatementList", s_cst), ('RBRACE', '}')
+            ('LBRACE', '{'), s_cst, ('RBRACE', '}')
         ])
         return ast, cst
 
@@ -478,7 +478,7 @@ class Parser:
             self.match('LBRACE')
             ast_list, cst_list = self.parse_StatementList()
             self.match('RBRACE')
-            return ast_list, CSTNode("BlockOrStmt", [('LBRACE', '{'), CSTNode("StatementList", cst_list), ('RBRACE', '}')])
+            return ast_list, CSTNode("BlockOrStmt", [('LBRACE', '{'), cst_list, ('RBRACE', '}')])
         else:
             ast, cst = self.parse_Statement()
             return [ast], CSTNode("BlockOrStmt", [cst])
