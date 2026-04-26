@@ -64,6 +64,39 @@ class Parser:
                 final_literals.append(str(node[1]))
         gather_terminals(cst_root)
         
+        # Readable Token Aliases (to make it look like Joe's format)
+        token_aliases = {
+            'IDENTIFIER': 'id',
+            'NUMBER': 'num',
+            'FLOAT_NUM': 'num',
+            'INT': 'type',
+            'FLOAT': 'type',
+            'DOUBLE': 'type',
+            'CHAR': 'type',
+            'BOOL': 'type',
+            'VOID': 'type',
+            'LBRACE': '{',
+            'RBRACE': '}',
+            'LPAREN': '(',
+            'RPAREN': ')',
+            'SEMI': ';',
+            'ASSIGN': '=',
+            'PLUS': '+',
+            'MINUS': '-',
+            'MUL': '*',
+            'DIV': '/',
+            'SHL': '<<',
+            'SHR': '>>',
+            'COUT': 'cout',
+            'CIN': 'cin',
+            'RETURN': 'return',
+            'MAIN': 'main',
+            'IF': 'if',
+            'ELSE': 'else',
+            'WHILE': 'while',
+            'FOR': 'for'
+        }
+        
         while True:
             # Format current sentential form
             str_form = []
@@ -73,8 +106,9 @@ class Parser:
                 elif n == "empty":
                     continue # Skip empty entirely
                 else:
-                    # Token type name
-                    str_form.append(str(n[0]))
+                    # Apply readable token alias if it exists, otherwise use the token type name
+                    tok_name = n[0]
+                    str_form.append(token_aliases.get(tok_name, tok_name))
             
             # Remove extra spaces if list is empty
             form_str = " ".join(str_form).strip()
