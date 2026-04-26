@@ -1,534 +1,691 @@
 import sys
 import json
-import lexer
 
 class SyntaxErrorExt(Exception):
     pass
-
-# ---------------------------------------------------------------------------
-# Terminal / Non-terminal sets
-# ---------------------------------------------------------------------------
-TERMINALS = {
-    'PREPROCESSOR', 'USING', 'NAMESPACE', 'STD',
-    'MAIN', 'CIN', 'COUT', 'ENDL', 'RETURN',
-    'VOID', 'INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'CONST',
-    'FOR', 'WHILE', 'DO', 'IF', 'ELSE', 'BREAK', 'CONTINUE',
-    'EQ', 'NEQ', 'LT', 'GT', 'LEQ', 'GEQ',
-    'SHL', 'SHR',
-    'AND', 'OR', 'NOT',
-    'INC', 'DEC',
-    'ASSIGN', 'PLUS_ASSIGN', 'MINUS_ASSIGN', 'TIMES_ASSIGN', 'DIV_ASSIGN',
-    'PLUS', 'MINUS', 'TIMES', 'DIVIDE', 'MOD',
-    'SEMI', 'COMMA', 'LBRACE', 'RBRACE', 'LPAREN', 'RPAREN',
-    'LBRACKET', 'RBRACKET',
-    'NUMBER', 'FLOAT_NUM', 'STRING', 'CHAR_LIT', 'TRUE', 'FALSE',
-    'IDENTIFIER', 'EOF'
-}
 
 def node(ntype, **kwargs):
     d = {"type": ntype}
     d.update(kwargs)
     return d
 
-# ---------------------------------------------------------------------------
-# Grammar  (each entry: LHS, [RHS symbols], semantic-action)
-# ---------------------------------------------------------------------------
-RULES = [
-    # Augmented start
-    ("S'",          ["Program"],                    lambda p: p[0][1]),
+class CSTNode:
+    def __init__(self, lhs, rhs_symbols):
+        self.lhs = lhs
+        self.rhs_symbols = rhs_symbols
 
-    # Program -> GlobalList
-    ("Program",     ["GlobalList"],                 lambda p: node("Program", body=p[0][1])),
+class Parser:
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.pos = 0
+        self.current_token = self.tokens[self.pos] if self.tokens else ('EOF', 'EOF', -1)
 
-    # GlobalList (left-recursive)
-    ("GlobalList",  ["GlobalList", "Global"],       lambda p: p[0][1] + [p[1][1]]),
-    ("GlobalList",  ["Global"],                     lambda p: [p[0][1]]),
-    ("GlobalList",  [],                             lambda p: []),
+    def advance(self):
+        self.pos += 1
+        if self.pos < len(self.tokens):
+            self.current_token = self.tokens[self.pos]
+        else:
+            self.current_token = ('EOF', 'EOF', -1)
 
-    # Global declarations
-    ("Global",      ["IncludeStmt"],                lambda p: p[0][1]),
-    ("Global",      ["UsingStmt"],                  lambda p: p[0][1]),
-    ("Global",      ["FunctionDef"],                lambda p: p[0][1]),
-    ("Global",      ["Stmt"],                       lambda p: p[0][1]),
+    def match(self, expected_type):
+        if self.current_token[0] == expected_type:
+            val = self.current_token[1]
+            line = self.current_token[2]
+            self.advance()
+            return val, line
+        else:
+            raise SyntaxErrorExt(f"SYNTAX ERROR at Line {self.current_token[2]}: Expected {expected_type}, got '{self.current_token[1]}' ({self.current_token[0]})")
 
-    # #include
-    ("IncludeStmt", ["PREPROCESSOR"],
-        lambda p: node("IncludeStatement", value=p[0][1], line=p[0][2])),
+    def peek(self):
+        return self.current_token[0]
 
-    # using namespace std;
-    ("UsingStmt",   ["USING", "NAMESPACE", "STD", "SEMI"],
-        lambda p: node("UsingStatement", ns=p[2][1], line=p[0][2])),
+    def parse(self):
+        print(">> Initializing Top-Down Parser Engine (Recursive Descent)...")
+        ast, cst = self.parse_Program()
+        if self.peek() != 'EOF' and self.peek() != '$':
+            raise SyntaxErrorExt(f"SYNTAX ERROR at Line {self.current_token[2]}: Unexpected token '{self.current_token[1]}' after program end.")
+        
+        print(">> Parse completed. Generating Right-Most Derivation sequence...")
+        derivation = self.generate_rmd(cst)
+        return ast, derivation
 
-    # Function Definitions
-    ("FunctionDef", ["Type", "MAIN", "LPAREN", "ParamList", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
-        lambda p: node("MainFunction", params=p[3][1], body=p[6][1], line=p[1][2])),
-
-    ("FunctionDef", ["Type", "IDENTIFIER", "LPAREN", "ParamList", "RPAREN", "LBRACE", "StmtList", "RBRACE"],
-        lambda p: node("FunctionDefinition", name=p[1][1], return_type=p[0][1], params=p[3][1], body=p[6][1], line=p[1][2])),
-
-    # Parameter List
-    ("ParamList",   ["ParamItems"],                 lambda p: p[0][1]),
-    ("ParamList",   [],                             lambda p: []),
-
-    ("ParamItems",  ["ParamItems", "COMMA", "Param"], lambda p: p[0][1] + [p[2][1]]),
-    ("ParamItems",  ["Param"],                      lambda p: [p[0][1]]),
-
-    ("Param",       ["Type", "IDENTIFIER"],
-        lambda p: node("Parameter", var_type=p[0][1], id=p[1][1], line=p[1][2])),
-
-    # Return types
-    ("RetType",     ["INT"],     lambda p: "int"),
-    ("RetType",     ["VOID"],    lambda p: "void"),
-    ("RetType",     ["FLOAT"],   lambda p: "float"),
-    ("RetType",     ["DOUBLE"],  lambda p: "double"),
-
-    # Type (for declarations and functions)
-    ("Type",        ["INT"],     lambda p: p[0][1]),
-    ("Type",        ["VOID"],    lambda p: p[0][1]),
-    ("Type",        ["FLOAT"],   lambda p: p[0][1]),
-    ("Type",        ["DOUBLE"],  lambda p: p[0][1]),
-    ("Type",        ["CHAR"],    lambda p: p[0][1]),
-    ("Type",        ["BOOL"],    lambda p: p[0][1]),
-    ("Type",        ["CONST", "INT"],    lambda p: "const int"),
-    ("Type",        ["CONST", "FLOAT"],  lambda p: "const float"),
-    ("Type",        ["CONST", "DOUBLE"], lambda p: "const double"),
-
-    # StatementList
-    ("StmtList",    ["StmtList", "Stmt"],  lambda p: p[0][1] + [p[1][1]]),
-    ("StmtList",    ["Stmt"],              lambda p: [p[0][1]]),
-    ("StmtList",    [],                    lambda p: []),
-
-    # Statement kinds
-    ("Stmt",        ["DeclStmt"],          lambda p: p[0][1]),
-    ("Stmt",        ["AssignStmt"],        lambda p: p[0][1]),
-    ("Stmt",        ["CompoundAssign"],    lambda p: p[0][1]),
-    ("Stmt",        ["IncrStmt"],          lambda p: p[0][1]),
-    ("Stmt",        ["WhileLoop"],         lambda p: p[0][1]),
-    ("Stmt",        ["ForLoop"],           lambda p: p[0][1]),
-    ("Stmt",        ["DoWhile"],           lambda p: p[0][1]),
-    ("Stmt",        ["IfStmt"],            lambda p: p[0][1]),
-    ("Stmt",        ["BreakStmt"],         lambda p: p[0][1]),
-    ("Stmt",        ["ContinueStmt"],      lambda p: p[0][1]),
-    ("Stmt",        ["CinStmt"],           lambda p: p[0][1]),
-    ("Stmt",        ["CoutStmt"],          lambda p: p[0][1]),
-    ("Stmt",        ["ReturnStmt"],        lambda p: p[0][1]),
-    ("Stmt",        ["ExprStmt"],          lambda p: p[0][1]),
-
-    # Block or single statement for loops / ifs
-    ("BlockOrStmt", ["LBRACE", "StmtList", "RBRACE"], lambda p: p[1][1]),
-    ("BlockOrStmt", ["Stmt"],                         lambda p: [p[0][1]]),
-
-    # --- Declarations ---
-    # int x;
-    ("DeclStmt",    ["Type", "IDENTIFIER", "SEMI"],
-        lambda p: node("Declaration", var_type=p[0][1], id=p[1][1], value=None, line=p[1][2])),
-    # int x = expr;
-    ("DeclStmt",    ["Type", "IDENTIFIER", "ASSIGN", "Expr", "SEMI"],
-        lambda p: node("Declaration", var_type=p[0][1], id=p[1][1], value=p[3][1], line=p[1][2])),
-    # int x, y;
-    ("DeclStmt",    ["Type", "VarList", "SEMI"],
-        lambda p: node("MultiDeclaration", var_type=p[0][1], vars=p[1][1], line=p[0][2])),
-
-    # VarList
-    ("VarList",     ["VarList", "COMMA", "VarItem"],  lambda p: p[0][1] + [p[2][1]]),
-    ("VarList",     ["VarItem", "COMMA", "VarItem"],  lambda p: [p[0][1], p[2][1]]),
-
-    ("VarItem",     ["IDENTIFIER"],
-        lambda p: node("VarDecl", id=p[0][1], value=None, line=p[0][2])),
-    ("VarItem",     ["IDENTIFIER", "ASSIGN", "Expr"],
-        lambda p: node("VarDecl", id=p[0][1], value=p[2][1], line=p[0][2])),
-
-    # --- Assignment ---
-    ("AssignStmt",  ["IDENTIFIER", "ASSIGN", "Expr", "SEMI"],
-        lambda p: node("Assignment", id=p[0][1], op="=", value=p[2][1], line=p[0][2])),
-
-    # Compound assignments: x += expr;
-    ("CompoundAssign", ["IDENTIFIER", "PLUS_ASSIGN",  "Expr", "SEMI"],
-        lambda p: node("Assignment", id=p[0][1], op="+=", value=p[2][1], line=p[0][2])),
-    ("CompoundAssign", ["IDENTIFIER", "MINUS_ASSIGN", "Expr", "SEMI"],
-        lambda p: node("Assignment", id=p[0][1], op="-=", value=p[2][1], line=p[0][2])),
-    ("CompoundAssign", ["IDENTIFIER", "TIMES_ASSIGN", "Expr", "SEMI"],
-        lambda p: node("Assignment", id=p[0][1], op="*=", value=p[2][1], line=p[0][2])),
-    ("CompoundAssign", ["IDENTIFIER", "DIV_ASSIGN",   "Expr", "SEMI"],
-        lambda p: node("Assignment", id=p[0][1], op="/=", value=p[2][1], line=p[0][2])),
-
-    # x++; x--;
-    ("IncrStmt",    ["IDENTIFIER", "INC", "SEMI"],
-        lambda p: node("IncrDecr", id=p[0][1], op="++", line=p[0][2])),
-    ("IncrStmt",    ["IDENTIFIER", "DEC", "SEMI"],
-        lambda p: node("IncrDecr", id=p[0][1], op="--", line=p[0][2])),
-
-    # --- Loops ---
-    ("WhileLoop",   ["WHILE", "LPAREN", "Condition", "RPAREN", "BlockOrStmt"],
-        lambda p: node("WhileLoop", condition=p[2][1], body=p[4][1], line=p[0][2])),
-
-    # for (init; cond; update) { body } or for (...) stmt
-    ("ForLoop",     ["FOR", "LPAREN", "ForInit", "Condition", "SEMI", "ForUpdate", "RPAREN", "BlockOrStmt"],
-        lambda p: node("ForLoop", init=p[2][1], condition=p[3][1], update=p[5][1], body=p[7][1], line=p[0][2])),
-
-    ("ForInit",     ["Type", "IDENTIFIER", "ASSIGN", "Expr", "SEMI"],
-        lambda p: node("Declaration", var_type=p[0][1], id=p[1][1], value=p[3][1], line=p[1][2])),
-    ("ForInit",     ["IDENTIFIER", "ASSIGN", "Expr", "SEMI"],
-        lambda p: node("Assignment", id=p[0][1], op="=", value=p[2][1], line=p[0][2])),
-    ("ForInit",     ["SEMI"],  lambda p: None),
-
-    ("ForUpdate",   ["IDENTIFIER", "INC"],
-        lambda p: node("IncrDecr", id=p[0][1], op="++", line=p[0][2])),
-    ("ForUpdate",   ["IDENTIFIER", "DEC"],
-        lambda p: node("IncrDecr", id=p[0][1], op="--", line=p[0][2])),
-    ("ForUpdate",   ["IDENTIFIER", "ASSIGN", "Expr"],
-        lambda p: node("Assignment", id=p[0][1], op="=", value=p[2][1], line=p[0][2])),
-    ("ForUpdate",   ["IDENTIFIER", "PLUS_ASSIGN",  "Expr"],
-        lambda p: node("Assignment", id=p[0][1], op="+=", value=p[2][1], line=p[0][2])),
-    ("ForUpdate",   ["IDENTIFIER", "MINUS_ASSIGN", "Expr"],
-        lambda p: node("Assignment", id=p[0][1], op="-=", value=p[2][1], line=p[0][2])),
-    ("ForUpdate",   [],  lambda p: None),
-
-    # do { } while ();
-    ("DoWhile",     ["DO", "BlockOrStmt", "WHILE", "LPAREN", "Condition", "RPAREN", "SEMI"],
-        lambda p: node("DoWhile", body=p[1][1], condition=p[4][1], line=p[0][2])),
-
-    # --- If / Else ---
-    ("IfStmt",      ["IF", "LPAREN", "Condition", "RPAREN", "BlockOrStmt", "ElseChain"],
-        lambda p: node("IfStatement", condition=p[2][1], body=p[4][1], else_body=p[5][1], line=p[0][2])),
-
-    ("ElseChain",   ["ELSE", "IF", "LPAREN", "Condition", "RPAREN", "BlockOrStmt", "ElseChain"],
-        lambda p: [node("IfStatement", condition=p[3][1], body=p[5][1], else_body=p[6][1], line=p[1][2])]),
-    ("ElseChain",   ["ELSE", "BlockOrStmt"],
-        lambda p: p[1][1]),
-    ("ElseChain",   [],  lambda p: None),
-
-    # --- Jump statements ---
-    ("BreakStmt",    ["BREAK",    "SEMI"],  lambda p: node("BreakStatement",    line=p[0][2])),
-    ("ContinueStmt", ["CONTINUE", "SEMI"],  lambda p: node("ContinueStatement", line=p[0][2])),
-    ("ReturnStmt",   ["RETURN", "Expr", "SEMI"],
-        lambda p: node("ReturnStatement", value=p[1][1], line=p[0][2])),
-    ("ReturnStmt",   ["RETURN", "SEMI"],
-        lambda p: node("ReturnStatement", value=None, line=p[0][2])),
-
-    # --- I/O ---
-    # cin >> a >> b >> ...
-    ("CinStmt",     ["CIN", "CinChain", "SEMI"],
-        lambda p: node("CinStatement", ids=p[1][1], line=p[0][2])),
-    ("CinChain",    ["CinChain", "SHR", "IDENTIFIER"],
-        lambda p: p[0][1] + [p[2][1]]),
-    ("CinChain",    ["SHR", "IDENTIFIER"],
-        lambda p: [p[1][1]]),
-
-    # cout << ... << endl;
-    ("CoutStmt",    ["COUT", "CoutItems", "SEMI"],
-        lambda p: node("CoutStatement", items=p[1][1], line=p[0][2])),
-    ("CoutItems",   ["CoutItems", "SHL", "CoutAtom"],
-        lambda p: p[0][1] + [p[2][1]]),
-    ("CoutItems",   ["SHL", "CoutAtom"],
-        lambda p: [p[1][1]]),
-
-    ("CoutAtom",    ["ENDL"],
-        lambda p: node("CoutItem", kind="endl",   value=None)),
-    ("CoutAtom",    ["STRING"],
-        lambda p: node("CoutItem", kind="string", value=p[0][1])),
-    ("CoutAtom",    ["Expr"],
-        lambda p: node("CoutItem", kind="expr",   value=p[0][1])),
-
-    # Expression statement (bare expression like function call)
-    ("ExprStmt",    ["Expr", "SEMI"],  lambda p: node("ExprStatement", expr=p[0][1], line=p[0][2])),
-
-    # --- Conditions ---
-    ("Condition",   ["Condition", "AND", "AndCond"],
-        lambda p: node("LogicalExpr", op="&&", left=p[0][1], right=p[2][1])),
-    ("Condition",   ["Condition", "OR",  "AndCond"],
-        lambda p: node("LogicalExpr", op="||", left=p[0][1], right=p[2][1])),
-    ("Condition",   ["AndCond"],  lambda p: p[0][1]),
-
-    ("AndCond",     ["NOT", "AndCond"],
-        lambda p: node("UnaryExpr", op="!", operand=p[1][1])),
-    ("AndCond",     ["Expr", "RelOp", "Expr"],
-        lambda p: node("Condition", left=p[0][1], operator=p[1][1], right=p[2][1])),
-    ("AndCond",     ["Expr"],  lambda p: p[0][1]),
-
-    ("RelOp",       ["EQ"],   lambda p: "=="),
-    ("RelOp",       ["NEQ"],  lambda p: "!="),
-    ("RelOp",       ["LT"],   lambda p: "<"),
-    ("RelOp",       ["GT"],   lambda p: ">"),
-    ("RelOp",       ["LEQ"],  lambda p: "<="),
-    ("RelOp",       ["GEQ"],  lambda p: ">="),
-
-    # --- Expressions (standard precedence: Expr > Term > Unary > Factor) ---
-    ("Expr",        ["Expr", "PLUS",   "Term"],
-        lambda p: node("BinaryExpression", operator="+",  left=p[0][1], right=p[2][1])),
-    ("Expr",        ["Expr", "MINUS",  "Term"],
-        lambda p: node("BinaryExpression", operator="-",  left=p[0][1], right=p[2][1])),
-    ("Expr",        ["Term"],  lambda p: p[0][1]),
-
-    ("Term",        ["Term",  "TIMES",  "Unary"],
-        lambda p: node("BinaryExpression", operator="*",  left=p[0][1], right=p[2][1])),
-    ("Term",        ["Term",  "DIVIDE", "Unary"],
-        lambda p: node("BinaryExpression", operator="/",  left=p[0][1], right=p[2][1])),
-    ("Term",        ["Term",  "MOD",    "Unary"],
-        lambda p: node("BinaryExpression", operator="%",  left=p[0][1], right=p[2][1])),
-    ("Term",        ["Unary"],  lambda p: p[0][1]),
-
-    ("Unary",       ["MINUS", "Factor"],
-        lambda p: node("UnaryExpr", op="neg", operand=p[1][1])),
-    ("Unary",       ["NOT",   "Factor"],
-        lambda p: node("UnaryExpr", op="!",   operand=p[1][1])),
-    ("Unary",       ["Factor"],  lambda p: p[0][1]),
-
-    ("Factor",      ["LPAREN", "Expr", "RPAREN"],  lambda p: p[1][1]),
-    ("Factor",      ["IDENTIFIER", "LPAREN", "ArgList", "RPAREN"],
-        lambda p: node("FunctionCall", name=p[0][1], args=p[2][1], line=p[0][2])),
-    ("Factor",      ["IDENTIFIER"],
-        lambda p: node("Identifier", value=p[0][1], line=p[0][2])),
-    ("Factor",      ["NUMBER"],
-        lambda p: node("Number",     value=p[0][1], line=p[0][2])),
-    ("Factor",      ["FLOAT_NUM"],
-        lambda p: node("FloatNumber", value=p[0][1], line=p[0][2])),
-    ("Factor",      ["STRING"],
-        lambda p: node("StringLiteral", value=p[0][1], line=p[0][2])),
-    ("Factor",      ["CHAR_LIT"],
-        lambda p: node("CharLiteral", value=p[0][1], line=p[0][2])),
-    ("Factor",      ["TRUE"],
-        lambda p: node("BoolLiteral", value=True, line=p[0][2])),
-    ("Factor",      ["FALSE"],
-        lambda p: node("BoolLiteral", value=False, line=p[0][2])),
-
-    # Function call argument list
-    ("ArgList",     ["ArgList", "COMMA", "Expr"],  lambda p: p[0][1] + [p[2][1]]),
-    ("ArgList",     ["Expr"],                      lambda p: [p[0][1]]),
-    ("ArgList",     [],                            lambda p: []),
-]
-
-NON_TERMINALS = set(r[0] for r in RULES)
-SYMBOLS       = TERMINALS | NON_TERMINALS | {'$'}
-
-
-# ---------------------------------------------------------------------------
-# SLR(1) table construction
-# ---------------------------------------------------------------------------
-
-def get_first_sets():
-    first = {s: set() for s in SYMBOLS}
-    first[''] = set()
-    for t in TERMINALS:
-        first[t].add(t)
-    first['$'].add('$')
-
-    changed = True
-    while changed:
-        changed = False
-        for lhs, rhs, _ in RULES:
-            if not rhs:
-                if '' not in first[lhs]:
-                    first[lhs].add('')
-                    changed = True
-                continue
-            for sym in rhs:
-                for f in first[sym]:
-                    if f and f not in first[lhs]:
-                        first[lhs].add(f)
-                        changed = True
-                if '' not in first[sym]:
-                    break
-            else:
-                if '' not in first[lhs]:
-                    first[lhs].add('')
-                    changed = True
-    return first
-
-
-def get_follow_sets(firsts):
-    follow = {n: set() for n in NON_TERMINALS}
-    follow["S'"].add('$')
-
-    changed = True
-    while changed:
-        changed = False
-        for lhs, rhs, _ in RULES:
-            for i, sym in enumerate(rhs):
-                if sym not in NON_TERMINALS:
-                    continue
-                nxt = rhs[i + 1:]
-                eps_all = True
-                for ns in nxt:
-                    for f in firsts[ns]:
-                        if f and f not in follow[sym]:
-                            follow[sym].add(f)
-                            changed = True
-                    if '' not in firsts[ns]:
-                        eps_all = False
-                        break
-                if eps_all:
-                    for f in follow[lhs]:
-                        if f not in follow[sym]:
-                            follow[sym].add(f)
-                            changed = True
-    return follow
-
-
-def closure(items):
-    c = set(items)
-    changed = True
-    while changed:
-        changed = False
-        for (ri, di) in list(c):
-            rhs = RULES[ri][1]
-            if di < len(rhs):
-                nxt = rhs[di]
-                if nxt in NON_TERMINALS:
-                    for i, (lh, _, _) in enumerate(RULES):
-                        if lh == nxt and (i, 0) not in c:
-                            c.add((i, 0))
-                            changed = True
-    return frozenset(c)
-
-
-def goto(items, symbol):
-    moved = set()
-    for (ri, di) in items:
-        rhs = RULES[ri][1]
-        if di < len(rhs) and rhs[di] == symbol:
-            moved.add((ri, di + 1))
-    return closure(moved) if moved else frozenset()
-
-
-def build_parser():
-    firsts  = get_first_sets()
-    follows = get_follow_sets(firsts)
-
-    I0     = closure({(0, 0)})
-    states = [I0]
-    state_map = {I0: 0}
-    transitions = {}
-
-    worklist = [I0]
-    while worklist:
-        state = worklist.pop()
-        si    = state_map[state]
-        for sym in SYMBOLS:
-            if sym in ('$', ''):
-                continue
-            nxt = goto(state, sym)
-            if not nxt:
-                continue
-            if nxt not in state_map:
-                state_map[nxt] = len(states)
-                states.append(nxt)
-                worklist.append(nxt)
-            transitions[(si, sym)] = state_map[nxt]
-
-    action     = {}
-    goto_table = {}
-
-    for state, si in state_map.items():
-        for (ri, di) in state:
-            lhs, rhs, _ = RULES[ri]
-            if di == len(rhs):                     # reduce / accept
-                if ri == 0:
-                    action[(si, '$')] = ('accept', 0)
+    def generate_rmd(self, cst_root):
+        steps = []
+        current_sentential = [cst_root]
+        
+        while True:
+            # Format current sentential form
+            str_form = []
+            for n in current_sentential:
+                if isinstance(n, CSTNode):
+                    str_form.append(n.lhs)
+                elif n == "empty":
+                    str_form.append("empty")
                 else:
-                    for f in follows[lhs]:
-                        key = (si, f)
-                        if key not in action:
-                            action[key] = ('reduce', ri)
-                        # on conflict prefer existing (shift-reduce: keep shift)
+                    str_form.append(n[0]) # Terminal token type
+            steps.append(" ".join(str_form))
+            
+            # Find right-most CSTNode
+            idx = -1
+            for i in range(len(current_sentential)-1, -1, -1):
+                if isinstance(current_sentential[i], CSTNode):
+                    idx = i
+                    break
+                    
+            if idx == -1:
+                break
+                
+            node_to_expand = current_sentential[idx]
+            rhs = node_to_expand.rhs_symbols
+            if not rhs:
+                rhs = ["empty"]
+            current_sentential = current_sentential[:idx] + rhs + current_sentential[idx+1:]
+            
+        return steps
+
+    # --- Grammar Rules ---
+
+    def parse_Program(self):
+        inc_ast, inc_cst = self.parse_IncludeStmt()
+        use_ast, use_cst = self.parse_UsingStmt()
+        gl_ast, gl_cst_list = self.parse_GlobalList()
+        
+        ast = node("Program", body=[inc_ast, use_ast] + gl_ast)
+        cst = CSTNode("Program", [inc_cst, use_cst, CSTNode("GlobalList", gl_cst_list)])
+        return ast, cst
+
+    def parse_IncludeStmt(self):
+        val, _ = self.match('PREPROCESSOR')
+        ast = node("IncludeStatement", value=val, line=self.current_token[2])
+        cst = CSTNode("IncludeStmt", [('PREPROCESSOR', val)])
+        return ast, cst
+
+    def parse_UsingStmt(self):
+        self.match('USING')
+        self.match('NAMESPACE')
+        val, _ = self.match('IDENTIFIER')
+        self.match('SEMI')
+        ast = node("UsingStatement", ns=val, line=self.current_token[2])
+        cst = CSTNode("UsingStmt", [('USING', 'using'), ('NAMESPACE', 'namespace'), ('IDENTIFIER', val), ('SEMI', ';')])
+        return ast, cst
+
+    def parse_GlobalList(self):
+        ast_list = []
+        cst_list = []
+        while self.peek() in ('INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'VOID', 'CONST'):
+            g_ast, g_cst = self.parse_Global()
+            ast_list.append(g_ast)
+            # Left recursion flattening for CST requires building the tree left-associatively
+            if not cst_list:
+                cst_list = [CSTNode("GlobalList", ["empty"]), g_cst]
             else:
-                a = rhs[di]
-                if a in TERMINALS and (si, a) in transitions:
-                    action[(si, a)] = ('shift', transitions[(si, a)])
+                cst_list = [CSTNode("GlobalList", cst_list), g_cst]
+                
+        if not cst_list:
+            cst_list = ["empty"]
+            
+        return ast_list, cst_list
 
-        for nt in NON_TERMINALS:
-            if (si, nt) in transitions:
-                goto_table[(si, nt)] = transitions[(si, nt)]
+    def parse_Global(self):
+        # Could be FunctionDef or Declaration (both start with Type)
+        # We need to peek ahead
+        saved_pos = self.pos
+        typ_ast, typ_cst = self.parse_Type()
+        
+        if self.peek() == 'MAIN':
+            self.pos = saved_pos
+            self.current_token = self.tokens[self.pos]
+            f_ast, f_cst = self.parse_FunctionDef()
+            return f_ast, CSTNode("Global", [f_cst])
+            
+        # It's an identifier. Could be function or decl.
+        self.match('IDENTIFIER')
+        if self.peek() == 'LPAREN':
+            self.pos = saved_pos
+            self.current_token = self.tokens[self.pos]
+            f_ast, f_cst = self.parse_FunctionDef()
+            return f_ast, CSTNode("Global", [f_cst])
+        else:
+            self.pos = saved_pos
+            self.current_token = self.tokens[self.pos]
+            d_ast, d_cst = self.parse_Declaration()
+            return d_ast, CSTNode("Global", [d_cst])
 
-    return action, goto_table
+    def parse_FunctionDef(self):
+        typ_ast, typ_cst = self.parse_Type()
+        line = self.current_token[2]
+        
+        if self.peek() == 'MAIN':
+            name, _ = self.match('MAIN')
+        else:
+            name, _ = self.match('IDENTIFIER')
+            
+        self.match('LPAREN')
+        p_ast, p_cst = self.parse_ParamList()
+        self.match('RPAREN')
+        self.match('LBRACE')
+        s_ast, s_cst = self.parse_StatementList()
+        self.match('RBRACE')
+        
+        if name == 'main':
+            ast = node("MainFunction", params=p_ast, body=s_ast, line=line)
+        else:
+            ast = node("FunctionDefinition", name=name, return_type=typ_ast, params=p_ast, body=s_ast, line=line)
+            
+        cst = CSTNode("FunctionDef", [
+            typ_cst, 
+            ('MAIN' if name == 'main' else 'IDENTIFIER', name), 
+            ('LPAREN', '('), p_cst, ('RPAREN', ')'), 
+            ('LBRACE', '{'), CSTNode("StatementList", s_cst), ('RBRACE', '}')
+        ])
+        return ast, cst
 
+    def parse_ParamList(self):
+        if self.peek() in ('INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'VOID', 'CONST'):
+            ast_list = []
+            cst_list = []
+            
+            p_ast, p_cst = self.parse_Param()
+            ast_list.append(p_ast)
+            cst_list = [p_cst]
+            
+            while self.peek() == 'COMMA':
+                self.match('COMMA')
+                p_ast, p_cst = self.parse_Param()
+                ast_list.append(p_ast)
+                cst_list = [CSTNode("ParamItems", cst_list), ('COMMA', ','), p_cst]
+                
+            return ast_list, CSTNode("ParamList", [CSTNode("ParamItems", cst_list)])
+        else:
+            return [], CSTNode("ParamList", ["empty"])
 
-# Cache tables across calls in the same process
-_action    = None
-_goto_tbl  = None
+    def parse_Param(self):
+        typ_ast, typ_cst = self.parse_Type()
+        id_val, line = self.match('IDENTIFIER')
+        return node("Parameter", var_type=typ_ast, id=id_val, line=line), CSTNode("Param", [typ_cst, ('IDENTIFIER', id_val)])
 
+    def parse_Type(self):
+        if self.peek() == 'CONST':
+            self.match('CONST')
+            t_val, _ = self.match(self.peek()) # INT, FLOAT, etc
+            return f"const {t_val.lower()}", CSTNode("Type", [('CONST', 'const'), (self.current_token[0], t_val)])
+        else:
+            t_val, _ = self.match(self.peek())
+            return t_val.lower(), CSTNode("Type", [(self.current_token[0], t_val)])
 
-def parse(token_list):
-    global _action, _goto_tbl
-    if _action is None:
-        print(">> Building SLR(1) parse tables (Right-Most Derivation)...")
-        _action, _goto_tbl = build_parser()
-        print(">> Parse tables built successfully.")
+    def parse_StatementList(self):
+        ast_list = []
+        cst_list = []
+        while self.peek() not in ('RBRACE', 'EOF', '$'):
+            s_ast, s_cst = self.parse_Statement()
+            ast_list.append(s_ast)
+            if not cst_list:
+                cst_list = [CSTNode("StatementList", ["empty"]), s_cst]
+            else:
+                cst_list = [CSTNode("StatementList", cst_list), s_cst]
+                
+        if not cst_list:
+            cst_list = ["empty"]
+        return ast_list, cst_list
 
-    stack        = [0]
-    sym_stack    = [("$", "$", 0)]
-    idx          = 0
+    def parse_Statement(self):
+        if self.peek() in ('INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'VOID', 'CONST'):
+            ast, cst = self.parse_Declaration()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'WHILE':
+            ast, cst = self.parse_WhileLoop()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'FOR':
+            ast, cst = self.parse_ForLoop()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'DO':
+            ast, cst = self.parse_DoWhile()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'IF':
+            ast, cst = self.parse_IfStatement()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'BREAK':
+            ast, cst = self.parse_BreakStmt()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'CONTINUE':
+            ast, cst = self.parse_ContinueStmt()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'CIN':
+            ast, cst = self.parse_CinStmt()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'COUT':
+            ast, cst = self.parse_CoutStmt()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'RETURN':
+            ast, cst = self.parse_ReturnStmt()
+            return ast, CSTNode("Statement", [cst])
+        elif self.peek() == 'IDENTIFIER':
+            # Could be Assignment, Increment, Decrement, or Function Call (Expr)
+            saved_pos = self.pos
+            self.match('IDENTIFIER')
+            nxt = self.peek()
+            self.pos = saved_pos
+            self.current_token = self.tokens[self.pos]
+            
+            if nxt in ('ASSIGN', 'PLUS_ASSIGN', 'MINUS_ASSIGN', 'TIMES_ASSIGN', 'DIV_ASSIGN', 'INC', 'DEC'):
+                ast, cst = self.parse_Assignment()
+                return ast, CSTNode("Statement", [cst])
+            else:
+                line = self.current_token[2]
+                expr_ast, expr_cst = self.parse_Expression()
+                self.match('SEMI')
+                return node("ExprStatement", expr=expr_ast, line=line), CSTNode("Statement", [expr_cst, ('SEMI', ';')])
+        else:
+            # Maybe ExprStmt
+            line = self.current_token[2]
+            expr_ast, expr_cst = self.parse_Expression()
+            self.match('SEMI')
+            return node("ExprStatement", expr=expr_ast, line=line), CSTNode("Statement", [expr_cst, ('SEMI', ';')])
 
-    while True:
-        state = stack[-1]
-        tok   = token_list[idx]
-        kind, val, line = tok[0], tok[1], tok[2]
+    def parse_Declaration(self):
+        typ_ast, typ_cst = self.parse_Type()
+        line = self.current_token[2]
+        
+        # Check if it's a VarList
+        saved_pos = self.pos
+        self.match('IDENTIFIER')
+        is_list = False
+        if self.peek() in ('COMMA',):
+            is_list = True
+        elif self.peek() == 'ASSIGN':
+            self.match('ASSIGN')
+            # skip expr
+            while self.peek() not in ('SEMI', 'COMMA', 'EOF'):
+                self.advance()
+            if self.peek() == 'COMMA':
+                is_list = True
+        
+        self.pos = saved_pos
+        self.current_token = self.tokens[self.pos]
+        
+        if is_list:
+            vars_ast = []
+            cst_list = []
+            
+            id_val, _ = self.match('IDENTIFIER')
+            if self.peek() == 'ASSIGN':
+                self.match('ASSIGN')
+                v_expr_ast, v_expr_cst = self.parse_Expression()
+                vars_ast.append(node("VarDecl", id=id_val, value=v_expr_ast, line=line))
+                cst_list = [CSTNode("VarItem", [('IDENTIFIER', id_val), ('ASSIGN', '='), v_expr_cst])]
+            else:
+                vars_ast.append(node("VarDecl", id=id_val, value=None, line=line))
+                cst_list = [CSTNode("VarItem", [('IDENTIFIER', id_val)])]
+                
+            while self.peek() == 'COMMA':
+                self.match('COMMA')
+                id_val, _ = self.match('IDENTIFIER')
+                if self.peek() == 'ASSIGN':
+                    self.match('ASSIGN')
+                    v_expr_ast, v_expr_cst = self.parse_Expression()
+                    vars_ast.append(node("VarDecl", id=id_val, value=v_expr_ast, line=line))
+                    cst_list = [CSTNode("VarList", cst_list), ('COMMA', ','), CSTNode("VarItem", [('IDENTIFIER', id_val), ('ASSIGN', '='), v_expr_cst])]
+                else:
+                    vars_ast.append(node("VarDecl", id=id_val, value=None, line=line))
+                    cst_list = [CSTNode("VarList", cst_list), ('COMMA', ','), CSTNode("VarItem", [('IDENTIFIER', id_val)])]
+            
+            self.match('SEMI')
+            ast = node("MultiDeclaration", var_type=typ_ast, vars=vars_ast, line=line)
+            return ast, CSTNode("Declaration", [typ_cst, CSTNode("VarList", cst_list), ('SEMI', ';')])
+        else:
+            id_val, _ = self.match('IDENTIFIER')
+            if self.peek() == 'ASSIGN':
+                self.match('ASSIGN')
+                expr_ast, expr_cst = self.parse_Expression()
+                self.match('SEMI')
+                ast = node("Declaration", var_type=typ_ast, id=id_val, value=expr_ast, line=line)
+                return ast, CSTNode("Declaration", [typ_cst, ('IDENTIFIER', id_val), ('ASSIGN', '='), expr_cst, ('SEMI', ';')])
+            else:
+                self.match('SEMI')
+                ast = node("Declaration", var_type=typ_ast, id=id_val, value=None, line=line)
+                return ast, CSTNode("Declaration", [typ_cst, ('IDENTIFIER', id_val), ('SEMI', ';')])
 
-        if kind == 'EOF':
-            kind = '$'
+    def parse_Assignment(self):
+        line = self.current_token[2]
+        id_val, _ = self.match('IDENTIFIER')
+        
+        if self.peek() == 'INC':
+            self.match('INC')
+            self.match('SEMI')
+            return node("IncrDecr", id=id_val, op="++", line=line), CSTNode("Assignment", [('IDENTIFIER', id_val), ('INC', '++'), ('SEMI', ';')])
+        elif self.peek() == 'DEC':
+            self.match('DEC')
+            self.match('SEMI')
+            return node("IncrDecr", id=id_val, op="--", line=line), CSTNode("Assignment", [('IDENTIFIER', id_val), ('DEC', '--'), ('SEMI', ';')])
+        else:
+            op_tok = self.peek()
+            op_val = self.current_token[1]
+            self.advance()
+            expr_ast, expr_cst = self.parse_Expression()
+            self.match('SEMI')
+            return node("Assignment", id=id_val, op=op_val, value=expr_ast, line=line), CSTNode("Assignment", [('IDENTIFIER', id_val), (op_tok, op_val), expr_cst, ('SEMI', ';')])
 
-        act = _action.get((state, kind))
+    def parse_WhileLoop(self):
+        line = self.current_token[2]
+        self.match('WHILE')
+        self.match('LPAREN')
+        cond_ast, cond_cst = self.parse_Condition()
+        self.match('RPAREN')
+        body_ast, body_cst = self.parse_BlockOrStmt()
+        return node("WhileLoop", condition=cond_ast, body=body_ast, line=line), CSTNode("WhileLoop", [('WHILE', 'while'), ('LPAREN', '('), cond_cst, ('RPAREN', ')'), body_cst])
 
-        if act is None:
-            expected = sorted({sym for (s, sym) in _action if s == state and sym != '$'})
-            raise SyntaxErrorExt(
-                f"SYNTAX ERROR at Line {line}: Unexpected token '{val}' ({kind}).\n"
-                f"  Expected one of: {', '.join(expected)}"
-            )
+    def parse_ForLoop(self):
+        line = self.current_token[2]
+        self.match('FOR')
+        self.match('LPAREN')
+        
+        # Init
+        if self.peek() in ('INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'CONST'):
+            typ_ast, typ_cst = self.parse_Type()
+            id_val, l2 = self.match('IDENTIFIER')
+            self.match('ASSIGN')
+            expr_ast, expr_cst = self.parse_Expression()
+            self.match('SEMI')
+            init_ast = node("Declaration", var_type=typ_ast, id=id_val, value=expr_ast, line=l2)
+            init_cst = CSTNode("ForInit", [typ_cst, ('IDENTIFIER', id_val), ('ASSIGN', '='), expr_cst, ('SEMI', ';')])
+        elif self.peek() == 'IDENTIFIER':
+            id_val, l2 = self.match('IDENTIFIER')
+            self.match('ASSIGN')
+            expr_ast, expr_cst = self.parse_Expression()
+            self.match('SEMI')
+            init_ast = node("Assignment", id=id_val, op="=", value=expr_ast, line=l2)
+            init_cst = CSTNode("ForInit", [('IDENTIFIER', id_val), ('ASSIGN', '='), expr_cst, ('SEMI', ';')])
+        else:
+            self.match('SEMI')
+            init_ast = None
+            init_cst = CSTNode("ForInit", [('SEMI', ';')])
+            
+        # Cond
+        cond_ast, cond_cst = self.parse_Condition()
+        self.match('SEMI')
+        
+        # Update
+        if self.peek() == 'IDENTIFIER':
+            id_val, l2 = self.match('IDENTIFIER')
+            if self.peek() == 'INC':
+                self.match('INC')
+                upd_ast = node("IncrDecr", id=id_val, op="++", line=l2)
+                upd_cst = CSTNode("ForUpdate", [('IDENTIFIER', id_val), ('INC', '++')])
+            elif self.peek() == 'DEC':
+                self.match('DEC')
+                upd_ast = node("IncrDecr", id=id_val, op="--", line=l2)
+                upd_cst = CSTNode("ForUpdate", [('IDENTIFIER', id_val), ('DEC', '--')])
+            else:
+                op_tok = self.peek()
+                op_val = self.current_token[1]
+                self.advance()
+                expr_ast, expr_cst = self.parse_Expression()
+                upd_ast = node("Assignment", id=id_val, op=op_val, value=expr_ast, line=l2)
+                upd_cst = CSTNode("ForUpdate", [('IDENTIFIER', id_val), (op_tok, op_val), expr_cst])
+        else:
+            upd_ast = None
+            upd_cst = CSTNode("ForUpdate", ["empty"])
+            
+        self.match('RPAREN')
+        body_ast, body_cst = self.parse_BlockOrStmt()
+        
+        return node("ForLoop", init=init_ast, condition=cond_ast, update=upd_ast, body=body_ast, line=line), CSTNode("ForLoop", [('FOR', 'for'), ('LPAREN', '('), init_cst, cond_cst, ('SEMI', ';'), upd_cst, ('RPAREN', ')'), body_cst])
 
-        act_type, act_val = act
+    def parse_DoWhile(self):
+        line = self.current_token[2]
+        self.match('DO')
+        body_ast, body_cst = self.parse_BlockOrStmt()
+        self.match('WHILE')
+        self.match('LPAREN')
+        cond_ast, cond_cst = self.parse_Condition()
+        self.match('RPAREN')
+        self.match('SEMI')
+        return node("DoWhile", body=body_ast, condition=cond_ast, line=line), CSTNode("DoWhile", [('DO', 'do'), body_cst, ('WHILE', 'while'), ('LPAREN', '('), cond_cst, ('RPAREN', ')'), ('SEMI', ';')])
 
-        if act_type == 'shift':
-            stack.append(act_val)
-            sym_stack.append((kind, val, line))
-            idx += 1
+    def parse_IfStatement(self):
+        line = self.current_token[2]
+        self.match('IF')
+        self.match('LPAREN')
+        cond_ast, cond_cst = self.parse_Condition()
+        self.match('RPAREN')
+        body_ast, body_cst = self.parse_BlockOrStmt()
+        else_ast, else_cst = self.parse_ElsePart()
+        return node("IfStatement", condition=cond_ast, body=body_ast, else_body=else_ast, line=line), CSTNode("IfStatement", [('IF', 'if'), ('LPAREN', '('), cond_cst, ('RPAREN', ')'), body_cst, else_cst])
 
-        elif act_type == 'reduce':
-            ri           = act_val
-            lhs, rhs, fn = RULES[ri]
-            p            = []
-            if rhs:
-                p         = sym_stack[-len(rhs):]
-                stack     = stack[:-len(rhs)]
-                sym_stack = sym_stack[:-len(rhs)]
+    def parse_ElsePart(self):
+        if self.peek() == 'ELSE':
+            line = self.current_token[2]
+            self.match('ELSE')
+            if self.peek() == 'IF':
+                self.match('IF')
+                self.match('LPAREN')
+                cond_ast, cond_cst = self.parse_Condition()
+                self.match('RPAREN')
+                body_ast, body_cst = self.parse_BlockOrStmt()
+                else_ast, else_cst = self.parse_ElsePart()
+                return [node("IfStatement", condition=cond_ast, body=body_ast, else_body=else_ast, line=line)], CSTNode("ElsePart", [('ELSE', 'else'), ('IF', 'if'), ('LPAREN', '('), cond_cst, ('RPAREN', ')'), body_cst, else_cst])
+            else:
+                body_ast, body_cst = self.parse_BlockOrStmt()
+                return body_ast, CSTNode("ElsePart", [('ELSE', 'else'), body_cst])
+        return None, CSTNode("ElsePart", ["empty"])
 
-            try:
-                result = fn(p)
-            except Exception as e:
-                raise SyntaxErrorExt(
-                    f"Semantic action error in rule {lhs} -> {rhs}: {e}"
-                )
+    def parse_BlockOrStmt(self):
+        if self.peek() == 'LBRACE':
+            self.match('LBRACE')
+            ast_list, cst_list = self.parse_StatementList()
+            self.match('RBRACE')
+            return ast_list, CSTNode("BlockOrStmt", [('LBRACE', '{'), CSTNode("StatementList", cst_list), ('RBRACE', '}')])
+        else:
+            ast, cst = self.parse_Statement()
+            return [ast], CSTNode("BlockOrStmt", [cst])
 
-            new_state  = stack[-1]
-            goto_state = _goto_tbl.get((new_state, lhs))
-            if goto_state is None:
-                raise SyntaxErrorExt(
-                    f"GOTO error: no transition for ({new_state}, {lhs})"
-                )
+    def parse_BreakStmt(self):
+        line = self.current_token[2]
+        self.match('BREAK')
+        self.match('SEMI')
+        return node("BreakStatement", line=line), CSTNode("BreakStmt", [('BREAK', 'break'), ('SEMI', ';')])
 
-            node_line = p[0][2] if p else 1
-            stack.append(goto_state)
-            sym_stack.append((lhs, result, node_line))
+    def parse_ContinueStmt(self):
+        line = self.current_token[2]
+        self.match('CONTINUE')
+        self.match('SEMI')
+        return node("ContinueStatement", line=line), CSTNode("ContinueStmt", [('CONTINUE', 'continue'), ('SEMI', ';')])
 
-        elif act_type == 'accept':
-            return sym_stack[-1][1]
+    def parse_ReturnStmt(self):
+        line = self.current_token[2]
+        self.match('RETURN')
+        if self.peek() == 'SEMI':
+            self.match('SEMI')
+            return node("ReturnStatement", value=None, line=line), CSTNode("ReturnStmt", [('RETURN', 'return'), ('SEMI', ';')])
+        else:
+            expr_ast, expr_cst = self.parse_Expression()
+            self.match('SEMI')
+            return node("ReturnStatement", value=expr_ast, line=line), CSTNode("ReturnStmt", [('RETURN', 'return'), expr_cst, ('SEMI', ';')])
 
+    def parse_CinStmt(self):
+        line = self.current_token[2]
+        self.match('CIN')
+        ids = []
+        cst_list = None
+        while self.peek() == 'SHR':
+            self.match('SHR')
+            id_val, _ = self.match('IDENTIFIER')
+            ids.append(id_val)
+            if cst_list is None:
+                cst_list = [('SHR', '>>'), ('IDENTIFIER', id_val)]
+            else:
+                cst_list = [CSTNode("CinChain", cst_list), ('SHR', '>>'), ('IDENTIFIER', id_val)]
+        self.match('SEMI')
+        
+        # Adjust CST for the loop to match original grammar style (optional, but good for right-most)
+        cst_node = CSTNode("CinChain", cst_list) if cst_list else CSTNode("CinChain", ["empty"])
+        return node("CinStatement", ids=ids, line=line), CSTNode("CinStmt", [('CIN', 'cin'), cst_node, ('SEMI', ';')])
 
-# ---------------------------------------------------------------------------
-# Standalone test
-# ---------------------------------------------------------------------------
-if __name__ == '__main__':
-    src_file = "test_program.cpp"
-    if len(sys.argv) > 1:
-        src_file = sys.argv[1]
+    def parse_CoutStmt(self):
+        line = self.current_token[2]
+        self.match('COUT')
+        items = []
+        cst_list = None
+        while self.peek() == 'SHL':
+            self.match('SHL')
+            if self.peek() == 'ENDL':
+                self.match('ENDL')
+                items.append(node("CoutItem", kind="endl", value=None))
+                atom_cst = CSTNode("CoutAtom", [('ENDL', 'endl')])
+            elif self.peek() == 'STRING':
+                val, _ = self.match('STRING')
+                items.append(node("CoutItem", kind="string", value=val))
+                atom_cst = CSTNode("CoutAtom", [('STRING', val)])
+            else:
+                expr_ast, expr_cst = self.parse_Expression()
+                items.append(node("CoutItem", kind="expr", value=expr_ast))
+                atom_cst = CSTNode("CoutAtom", [expr_cst])
+                
+            if cst_list is None:
+                cst_list = [('SHL', '<<'), atom_cst]
+            else:
+                cst_list = [CSTNode("CoutItems", cst_list), ('SHL', '<<'), atom_cst]
+                
+        self.match('SEMI')
+        cst_node = CSTNode("CoutItems", cst_list) if cst_list else CSTNode("CoutItems", ["empty"])
+        return node("CoutStatement", items=items, line=line), CSTNode("CoutStmt", [('COUT', 'cout'), cst_node, ('SEMI', ';')])
 
-    try:
-        with open(src_file, 'r') as f:
-            code = f.read()
-        tokens = lexer.lex(code)
-        ast    = parse(tokens)
-        with open("ast_output.json", 'w') as f:
-            json.dump(ast, f, indent=4)
-        print("SUCCESS — AST written to ast_output.json")
-    except Exception as e:
-        print(f"FAILED: {e}")
+    def parse_Condition(self):
+        ast, cst = self.parse_AndCond()
+        while self.peek() == 'OR':
+            self.match('OR')
+            right_ast, right_cst = self.parse_AndCond()
+            ast = node("LogicalExpr", op="||", left=ast, right=right_ast)
+            cst = CSTNode("Condition", [cst, ('OR', '||'), right_cst])
+        return ast, cst
+
+    def parse_AndCond(self):
+        ast, cst = self.parse_CondAtom()
+        while self.peek() == 'AND':
+            self.match('AND')
+            right_ast, right_cst = self.parse_CondAtom()
+            ast = node("LogicalExpr", op="&&", left=ast, right=right_ast)
+            cst = CSTNode("AndCond", [cst, ('AND', '&&'), right_cst])
+        return ast, cst
+
+    def parse_CondAtom(self):
+        if self.peek() == 'NOT':
+            self.match('NOT')
+            inner_ast, inner_cst = self.parse_CondAtom()
+            return node("UnaryExpr", op="!", operand=inner_ast), CSTNode("CondAtom", [('NOT', '!'), inner_cst])
+        else:
+            left_ast, left_cst = self.parse_Expression()
+            if self.peek() in ('EQ', 'NEQ', 'LT', 'GT', 'LEQ', 'GEQ'):
+                op_tok = self.peek()
+                op_val = self.current_token[1]
+                self.advance()
+                right_ast, right_cst = self.parse_Expression()
+                
+                # RelOp CST
+                rel_cst = CSTNode("RelOp", [(op_tok, op_val)])
+                
+                # Convert operator for AST
+                if op_tok == 'EQ': op = '=='
+                elif op_tok == 'NEQ': op = '!='
+                elif op_tok == 'LEQ': op = '<='
+                elif op_tok == 'GEQ': op = '>='
+                else: op = op_val
+                
+                return node("Condition", left=left_ast, operator=op, right=right_ast), CSTNode("CondAtom", [left_cst, rel_cst, right_cst])
+            return left_ast, CSTNode("CondAtom", [left_cst])
+
+    def parse_Expression(self):
+        ast, cst = self.parse_Term()
+        while self.peek() in ('PLUS', 'MINUS'):
+            op_tok = self.peek()
+            op_val = self.current_token[1]
+            self.advance()
+            right_ast, right_cst = self.parse_Term()
+            ast = node("BinaryExpression", operator="+" if op_tok == 'PLUS' else "-", left=ast, right=right_ast)
+            cst = CSTNode("Expression", [cst, (op_tok, op_val), right_cst])
+        return ast, cst
+
+    def parse_Term(self):
+        ast, cst = self.parse_Unary()
+        while self.peek() in ('TIMES', 'DIVIDE', 'MOD'):
+            op_tok = self.peek()
+            op_val = self.current_token[1]
+            self.advance()
+            right_ast, right_cst = self.parse_Unary()
+            op = "*" if op_tok == 'TIMES' else ("/" if op_tok == 'DIVIDE' else "%")
+            ast = node("BinaryExpression", operator=op, left=ast, right=right_ast)
+            cst = CSTNode("Term", [cst, (op_tok, op_val), right_cst])
+        return ast, cst
+
+    def parse_Unary(self):
+        if self.peek() == 'MINUS':
+            self.match('MINUS')
+            fac_ast, fac_cst = self.parse_Factor()
+            return node("UnaryExpr", op="neg", operand=fac_ast), CSTNode("Unary", [('MINUS', '-'), fac_cst])
+        elif self.peek() == 'NOT':
+            self.match('NOT')
+            fac_ast, fac_cst = self.parse_Factor()
+            return node("UnaryExpr", op="!", operand=fac_ast), CSTNode("Unary", [('NOT', '!'), fac_cst])
+        else:
+            ast, cst = self.parse_Factor()
+            return ast, CSTNode("Unary", [cst])
+
+    def parse_Factor(self):
+        line = self.current_token[2]
+        if self.peek() == 'LPAREN':
+            self.match('LPAREN')
+            expr_ast, expr_cst = self.parse_Expression()
+            self.match('RPAREN')
+            return expr_ast, CSTNode("Factor", [('LPAREN', '('), expr_cst, ('RPAREN', ')')])
+        elif self.peek() == 'NUMBER':
+            val, _ = self.match('NUMBER')
+            return node("Number", value=val, line=line), CSTNode("Factor", [('NUMBER', val)])
+        elif self.peek() == 'FLOAT_NUM':
+            val, _ = self.match('FLOAT_NUM')
+            return node("FloatNumber", value=val, line=line), CSTNode("Factor", [('FLOAT_NUM', val)])
+        elif self.peek() == 'STRING':
+            val, _ = self.match('STRING')
+            return node("StringLiteral", value=val, line=line), CSTNode("Factor", [('STRING', val)])
+        elif self.peek() == 'CHAR_LIT':
+            val, _ = self.match('CHAR_LIT')
+            return node("CharLiteral", value=val, line=line), CSTNode("Factor", [('CHAR_LIT', val)])
+        elif self.peek() == 'TRUE':
+            val, _ = self.match('TRUE')
+            return node("BoolLiteral", value=True, line=line), CSTNode("Factor", [('TRUE', 'true')])
+        elif self.peek() == 'FALSE':
+            val, _ = self.match('FALSE')
+            return node("BoolLiteral", value=False, line=line), CSTNode("Factor", [('FALSE', 'false')])
+        elif self.peek() == 'IDENTIFIER':
+            id_val, _ = self.match('IDENTIFIER')
+            if self.peek() == 'LPAREN':
+                self.match('LPAREN')
+                args_ast, args_cst = self.parse_ArgList()
+                self.match('RPAREN')
+                return node("FunctionCall", name=id_val, args=args_ast, line=line), CSTNode("Factor", [('IDENTIFIER', id_val), ('LPAREN', '('), args_cst, ('RPAREN', ')')])
+            else:
+                return node("Identifier", value=id_val, line=line), CSTNode("Factor", [('IDENTIFIER', id_val)])
+        else:
+            raise SyntaxErrorExt(f"SYNTAX ERROR at Line {line}: Unexpected token '{self.current_token[1]}' in Factor.")
+
+    def parse_ArgList(self):
+        if self.peek() in ('RPAREN', 'EOF'):
+            return [], CSTNode("ArgList", ["empty"])
+            
+        ast_list = []
+        cst_list = []
+        
+        expr_ast, expr_cst = self.parse_Expression()
+        ast_list.append(expr_ast)
+        cst_list = [expr_cst]
+        
+        while self.peek() == 'COMMA':
+            self.match('COMMA')
+            expr_ast, expr_cst = self.parse_Expression()
+            ast_list.append(expr_ast)
+            cst_list = [CSTNode("ArgList", cst_list), ('COMMA', ','), expr_cst]
+            
+        return ast_list, CSTNode("ArgList", cst_list)
+
+def parse(tokens):
+    parser = Parser(tokens)
+    return parser.parse()
