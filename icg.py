@@ -282,6 +282,42 @@ class TACOptimizer:
         except Exception:
             return None
 
+    def get_used_vars(self, instructions):
+        used = set()
+        for instr in instructions:
+            parts = instr.split()
+            if not parts or instr.endswith(':'):
+                continue
+
+            if parts[0] == 'print':
+                rest = instr[6:].strip()
+                if rest != '\\n' and not (rest.startswith('"') and rest.endswith('"')):
+                    used.add(rest)
+            elif parts[0] == 'return':
+                if len(parts) > 1:
+                    used.add(parts[1])
+            elif parts[0] in ('ifFalse', 'ifTrue'):
+                used.add(parts[1])
+            elif parts[0] == 'param':
+                used.add(parts[1])
+            elif '=' in parts:
+                left, right = instr.split('=', 1)
+                right = right.strip()
+                if right.startswith('call '):
+                    try:
+                        args_str = right.split('(', 1)[1].rsplit(')', 1)[0]
+                        for a in args_str.split(','):
+                            a = a.strip()
+                            if a and self._num(a) is None:
+                                used.add(a)
+                    except: pass
+                else:
+                    for p in right.split():
+                        if p not in ('neg', '!', '+', '-', '*', '/', '%', '<', '>', '<=', '>=', '==', '!=', '&&', '||'):
+                            if self._num(p) is None and not (p.startswith('"') and p.endswith('"')):
+                                used.add(p)
+        return used
+
     def optimize(self):
         consts = {}
 
@@ -389,6 +425,46 @@ class TACOptimizer:
             # Anything else
             self.optimized.append(instr)
 
+        # ---------------------------------------------------------
+        # Phase 2: Unreachable Code Elimination
+        # ---------------------------------------------------------
+        reachable = []
+        unreachable_mode = False
+        for instr in self.optimized:
+            if instr.endswith(":"):
+                unreachable_mode = False
+                reachable.append(instr)
+            elif not unreachable_mode:
+                reachable.append(instr)
+                if instr.startswith("goto ") or instr.startswith("return"):
+                    unreachable_mode = True
+
+        # ---------------------------------------------------------
+        # Phase 3: Dead Code Elimination (Iterative)
+        # ---------------------------------------------------------
+        changed = True
+        final_optimized = reachable
+        while changed:
+            changed = False
+            used_vars = self.get_used_vars(final_optimized)
+            
+            new_optimized = []
+            for instr in final_optimized:
+                keep = True
+                parts = instr.split()
+                if len(parts) >= 3 and parts[1] == '=':
+                    target = parts[0]
+                    # Don't eliminate if target is a function call side-effect, just in case
+                    if 'call' not in instr and target not in used_vars:
+                        keep = False
+                        changed = True
+                
+                if keep:
+                    new_optimized.append(instr)
+                    
+            final_optimized = new_optimized
+
+        self.optimized = final_optimized
         return self.optimized
 
 
@@ -687,7 +763,7 @@ if __name__ == "__main__":
     print("==============================================================")
 
     # Run Executor (stdin = empty)
-    executor = TACExecutor(raw_tac)
+    executor = TACExecutor(opt_tac)
     output = executor.run()
     print("\n===== PROGRAM OUTPUT (V2.0) =====")
     print(output if output.strip() else "(no output — program uses cin, provide stdin values)")
