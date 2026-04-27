@@ -100,28 +100,31 @@ class Parser:
             'PREPROCESSOR': 'include'
         }
         
-        while True:
-            # Format current sentential form
+        def get_literals(sentential_form):
             str_form = []
-            for n in current_sentential:
+            for n in sentential_form:
                 if isinstance(n, CSTNode):
                     str_form.append(n.lhs)
                 elif n == "empty":
                     continue # Skip empty entirely
                 else:
-                    # Apply readable token alias if it exists, otherwise use the token type name
                     tok_name = n[0]
                     str_form.append(token_aliases.get(tok_name, tok_name))
+            return str_form
+        
+        skip_print = False
+        
+        while True:
+            # Format current form
+            form_literals = get_literals(current_sentential)
+            form_str = " ".join(form_literals)
             
-            # Remove extra spaces if list is empty
-            form_str = " ".join(str_form).strip()
-            
-            if step_counter == 1:
-                steps.append(f"Step {step_counter}:\n{cst_root.lhs} -> {form_str}")
-            else:
-                steps.append(f"Step {step_counter}:\n-> {form_str}")
-                
-            step_counter += 1
+            if not skip_print:
+                if step_counter == 1:
+                    steps.append(f"Step {step_counter}:\n{cst_root.lhs} -> {form_str}")
+                else:
+                    steps.append(f"Step {step_counter}:\n-> {form_str}")
+                step_counter += 1
             
             # Find RIGHT-MOST CSTNode (Strict Right-Most Derivation)
             idx = -1
@@ -134,6 +137,13 @@ class Parser:
                 break
                 
             node_to_expand = current_sentential[idx]
+            
+            # Skip printing the intermediate wrapper states
+            if node_to_expand.lhs in ("Statement", "Declaration", "Global", "Param", "ReturnStmt"):
+                skip_print = True
+            else:
+                skip_print = False
+                
             rhs = node_to_expand.rhs_symbols
             if not rhs:
                 rhs = ["empty"]
