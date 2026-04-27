@@ -77,8 +77,11 @@ TOKEN_CATEGORIES = {
 
     # Identifier
     'IDENTIFIER': 'IDENTIFIER',
-    'MAIN':       'IDENTIFIER', 'CIN':      'IDENTIFIER', 
+    'CIN':        'IDENTIFIER', 
     'COUT':       'IDENTIFIER', 'ENDL':     'IDENTIFIER',
+    
+    # We now classify MAIN as a Keyword per user request
+    'MAIN':       'KEYWORD',
 
     # Operators  (arithmetic, relational, logical, assignment, stream)
     'PLUS':         'OPERATOR', 'MINUS':        'OPERATOR',
