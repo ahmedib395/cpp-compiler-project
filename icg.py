@@ -575,10 +575,10 @@ class TACExecutor:
 
         while pc < len(self.tac):
             if steps > self.max_steps:
-                self.output_lines.append("[VM] Execution limit reached.")
+                self.output_lines.append("\n[RUNTIME ERROR] Maximum instruction limit exceeded (possible infinite loop).")
                 break
             if len(self.output_lines) > self.max_output:
-                self.output_lines.append("[VM] Output limit reached.")
+                self.output_lines.append("\n[RUNTIME ERROR] Standard output limit exceeded (buffer overflow).")
                 break
             steps += 1
             
