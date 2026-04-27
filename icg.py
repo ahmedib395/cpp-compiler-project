@@ -464,6 +464,73 @@ class TACOptimizer:
                     
             final_optimized = new_optimized
 
+        # ---------------------------------------------------------
+        # Phase 4: Label and Jump Optimization (Requested)
+        # ---------------------------------------------------------
+        pass_changed = True
+        while pass_changed:
+            pass_changed = False
+            
+            # 1. Consecutive Label Merging (L1: L2: -> replace L2 with L1)
+            # 2. Jump Threading (L1: goto L2 -> replace L1 with L2)
+            label_map = {}
+            for i in range(len(final_optimized)):
+                instr = final_optimized[i]
+                if instr.endswith(':'):
+                    lname = instr[:-1]
+                    if i + 1 < len(final_optimized):
+                        next_instr = final_optimized[i+1].strip()
+                        # Consecutive labels
+                        if next_instr.endswith(':'):
+                            next_lname = next_instr[:-1]
+                            if lname != next_lname:
+                                label_map[next_lname] = lname
+                        # Jump threading
+                        elif next_instr.startswith('goto '):
+                            target = next_instr.split()[1]
+                            if lname != target:
+                                label_map[lname] = target
+
+            if label_map:
+                new_optimized = []
+                for instr in final_optimized:
+                    parts = instr.split()
+                    if not parts:
+                        new_optimized.append(instr)
+                        continue
+                    if parts[0] == 'goto' and parts[1] in label_map:
+                        new_optimized.append(f"goto {label_map[parts[1]]}")
+                        pass_changed = True
+                    elif parts[0] in ('ifTrue', 'ifFalse') and parts[3] in label_map:
+                        new_optimized.append(f"{parts[0]} {parts[1]} goto {label_map[parts[3]]}")
+                        pass_changed = True
+                    elif instr.endswith(':') and instr[:-1] in label_map:
+                        # If this label was merged into another, we can keep it for now
+                        # but the used label cleanup will catch it.
+                        new_optimized.append(instr)
+                    else:
+                        new_optimized.append(instr)
+                final_optimized = new_optimized
+
+            # 3. Unused Label Cleanup
+            used_labels = set(['main'])
+            for instr in final_optimized:
+                parts = instr.split()
+                if not parts: continue
+                if parts[0] == 'goto': used_labels.add(parts[1])
+                elif parts[0] in ('ifTrue', 'ifFalse'): used_labels.add(parts[3])
+            
+            cleaned = []
+            for instr in final_optimized:
+                if instr.endswith(':') and not instr.startswith('if'):
+                    if instr[:-1] in used_labels:
+                        cleaned.append(instr)
+                    else:
+                        pass_changed = True # We removed a label!
+                else:
+                    cleaned.append(instr)
+            final_optimized = cleaned
+
         self.optimized = final_optimized
         return self.optimized
 
@@ -483,7 +550,8 @@ class TACExecutor:
         self.env          = {}
         self.output_lines = []
         self.stdin_iter   = iter(stdin_values or [])
-        self.max_steps    = 100_000     # guard against infinite loops
+        self.max_steps    = 50_000      # limit steps
+        self.max_output   = 2_000       # limit output lines to prevent crash
 
     # ------------------------------------------------------------------
     def run(self):
@@ -507,7 +575,10 @@ class TACExecutor:
 
         while pc < len(self.tac):
             if steps > self.max_steps:
-                self.output_lines.append("[VM] Execution limit reached (possible infinite loop).")
+                self.output_lines.append("[VM] Execution limit reached.")
+                break
+            if len(self.output_lines) > self.max_output:
+                self.output_lines.append("[VM] Output limit reached.")
                 break
             steps += 1
             
