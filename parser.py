@@ -87,14 +87,17 @@ class Parser:
             'DIV': '/',
             'SHL': '<<',
             'SHR': '>>',
-            'COUT': 'cout',
+            'COUT': 'output',
             'CIN': 'cin',
             'RETURN': 'return',
             'MAIN': 'main',
             'IF': 'if',
             'ELSE': 'else',
             'WHILE': 'while',
-            'FOR': 'for'
+            'FOR': 'for',
+            'USING': 'using',
+            'NAMESPACE': 'namespace',
+            'PREPROCESSOR': 'include'
         }
         
         while True:
@@ -167,22 +170,19 @@ class Parser:
 
     def parse_GlobalList(self):
         ast_list = []
-        cst_list = []
+        globals_cst = []
         
         while self.peek() in ('INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'VOID', 'CONST'):
             g_ast, g_cst = self.parse_Global()
             ast_list.append(g_ast)
+            globals_cst.append(g_cst)
             
-            # Left recursion flattening for CST: GlobalList -> GlobalList Global
-            if not cst_list:
-                cst_list = [CSTNode("GlobalList", ["empty"]), g_cst]
-            else:
-                cst_list = [CSTNode("GlobalList", cst_list), g_cst]
-                
-        if not cst_list:
-            cst_list = ["empty"]
+        # Build right-associative CST: GlobalList -> Global GlobalList | empty
+        curr_cst = CSTNode("GlobalList", ["empty"])
+        for g_cst in reversed(globals_cst):
+            curr_cst = CSTNode("GlobalList", [g_cst, curr_cst])
             
-        return ast_list, CSTNode("GlobalList", cst_list) if isinstance(cst_list, list) else cst_list
+        return ast_list, curr_cst
 
     def parse_Global(self):
         # Could be FunctionDef or Declaration (both start with Type)
@@ -239,23 +239,27 @@ class Parser:
         return ast, cst
 
     def parse_ParamList(self):
+        params_ast = []
+        params_cst = []
+        
         if self.peek() in ('INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'VOID', 'CONST'):
-            ast_list = []
-            cst_list = []
-            
             p_ast, p_cst = self.parse_Param()
-            ast_list.append(p_ast)
-            cst_list = [p_cst]
+            params_ast.append(p_ast)
+            params_cst.append(p_cst)
             
             while self.peek() == 'COMMA':
-                self.match('COMMA')
+                c_val, _ = self.match('COMMA')
+                params_cst.append(CSTNode("COMMA", [('COMMA', c_val)]))
                 p_ast, p_cst = self.parse_Param()
-                ast_list.append(p_ast)
-                cst_list = [CSTNode("ParamItems", cst_list), ('COMMA', ','), p_cst]
+                params_ast.append(p_ast)
+                params_cst.append(p_cst)
                 
-            return ast_list, CSTNode("ParamList", [CSTNode("ParamItems", cst_list)])
-        else:
-            return [], CSTNode("ParamList", ["empty"])
+        # Build right-associative CST: ParamList -> Param COMMA ParamList | Param | empty
+        curr_cst = CSTNode("ParamList", ["empty"])
+        for p_cst in reversed(params_cst):
+            curr_cst = CSTNode("ParamList", [p_cst, curr_cst])
+            
+        return params_ast, curr_cst
 
     def parse_Param(self):
         typ_ast, typ_cst = self.parse_Type()
@@ -275,22 +279,19 @@ class Parser:
 
     def parse_StatementList(self):
         ast_list = []
-        cst_list = []
+        stmt_cst_list = []
         
         while self.peek() not in ('RBRACE', 'EOF', '$'):
             s_ast, s_cst = self.parse_Statement()
             ast_list.append(s_ast)
+            stmt_cst_list.append(s_cst)
             
-            # Left recursion flattening for CST: StatementList -> StatementList Statement
-            if not cst_list:
-                cst_list = [CSTNode("StatementList", ["empty"]), s_cst]
-            else:
-                cst_list = [CSTNode("StatementList", cst_list), s_cst]
-                
-        if not cst_list:
-            cst_list = ["empty"]
+        # Build right-associative CST: StatementList -> Statement StatementList | empty
+        curr_cst = CSTNode("StatementList", ["empty"])
+        for s_cst in reversed(stmt_cst_list):
+            curr_cst = CSTNode("StatementList", [s_cst, curr_cst])
             
-        return ast_list, CSTNode("StatementList", cst_list) if isinstance(cst_list, list) else cst_list
+        return ast_list, curr_cst
 
     def parse_Statement(self):
         if self.peek() in ('INT', 'FLOAT', 'DOUBLE', 'CHAR', 'BOOL', 'VOID', 'CONST'):
