@@ -440,29 +440,35 @@ class TACOptimizer:
                     unreachable_mode = True
 
         # ---------------------------------------------------------
-        # Phase 3: Dead Code Elimination (Iterative)
+        # Phase 3: Dead Code Elimination (Backwards Liveness Analysis)
         # ---------------------------------------------------------
         changed = True
         final_optimized = reachable
         while changed:
             changed = False
-            used_vars = self.get_used_vars(final_optimized)
             
-            new_optimized = []
-            for instr in final_optimized:
+            # To handle control flow (loops) correctly on a flat list,
+            # we seed the live_vars with globally read variables. 
+            # Then we do the backwards sweep to eliminate dead assignments.
+            live_vars = self.get_used_vars(final_optimized)
+            
+            new_optimized_reversed = []
+            # Backwards liveness sweep
+            for instr in reversed(final_optimized):
                 keep = True
                 parts = instr.split()
+                
                 if len(parts) >= 3 and parts[1] == '=':
                     target = parts[0]
-                    # Don't eliminate if target is a function call side-effect, just in case
-                    if 'call' not in instr and target not in used_vars:
+                    # If target is not live and it's not a function call, delete the assignment
+                    if target not in live_vars and 'call' not in instr:
                         keep = False
                         changed = True
                 
                 if keep:
-                    new_optimized.append(instr)
+                    new_optimized_reversed.append(instr)
                     
-            final_optimized = new_optimized
+            final_optimized = new_optimized_reversed[::-1]
 
         # ---------------------------------------------------------
         # Phase 4: Label and Jump Optimization (Requested)
