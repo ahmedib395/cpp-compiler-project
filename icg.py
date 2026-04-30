@@ -347,17 +347,7 @@ class TACOptimizer:
 
             # ifFalse / ifTrue
             if parts[0] in ('ifFalse', 'ifTrue'):
-                cvar = parts[1]
-                if cvar in consts:
-                    cv = consts[cvar]
-                    is_true = bool(cv)
-                    jump = (parts[0] == 'ifTrue' and is_true) or \
-                           (parts[0] == 'ifFalse' and not is_true)
-                    if jump:
-                        self.optimized.append(f"goto {parts[3]}")
-                    # else: skip (dead branch)
-                else:
-                    self.optimized.append(instr)
+                self.optimized.append(instr)
                 consts.clear()
                 continue
 
