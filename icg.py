@@ -440,35 +440,79 @@ class TACOptimizer:
                     unreachable_mode = True
 
         # ---------------------------------------------------------
-        # Phase 3: Dead Code Elimination (Backwards Liveness Analysis)
+        # Phase 3: Dead Code Elimination (True Backwards Liveness Analysis)
         # ---------------------------------------------------------
         changed = True
         final_optimized = reachable
         while changed:
             changed = False
-            
-            # To handle control flow (loops) correctly on a flat list,
-            # we seed the live_vars with globally read variables. 
-            # Then we do the backwards sweep to eliminate dead assignments.
-            live_vars = self.get_used_vars(final_optimized)
-            
+            live_vars = set()
             new_optimized_reversed = []
-            # Backwards liveness sweep
+            
             for instr in reversed(final_optimized):
-                keep = True
                 parts = instr.split()
+                if not parts:
+                    new_optimized_reversed.append(instr)
+                    continue
+
+                keep = True
+
+                # 1. Print or condition -> add to live
+                if parts[0] == 'print':
+                    # e.g., print x
+                    rest = instr[6:].strip()
+                    if rest != '\\n' and not (rest.startswith('"') and rest.endswith('"')):
+                        live_vars.add(rest)
                 
-                if len(parts) >= 3 and parts[1] == '=':
+                elif parts[0] in ('ifFalse', 'ifTrue'):
+                    # e.g., ifFalse t1 goto L1
+                    live_vars.add(parts[1])
+                    
+                elif parts[0] == 'return':
+                    # e.g., return x
+                    if len(parts) > 1:
+                        live_vars.add(parts[1])
+                
+                elif parts[0] == 'param':
+                    live_vars.add(parts[1])
+                
+                # 2. Assignment -> VAR = expr
+                elif len(parts) >= 3 and parts[1] == '=':
                     target = parts[0]
-                    # If target is not live and it's not a function call, delete the assignment
-                    if target not in live_vars and 'call' not in instr:
-                        keep = False
-                        changed = True
+                    # If it's a function call, we cannot safely delete it due to side effects
+                    if 'call' in instr:
+                        if target in live_vars:
+                            live_vars.remove(target)
+                        # Add args to live
+                        try:
+                            args_str = instr.split('(', 1)[1].rsplit(')', 1)[0]
+                            for a in args_str.split(','):
+                                a = a.strip()
+                                if a and self._num(a) is None:
+                                    live_vars.add(a)
+                        except: pass
+                    else:
+                        if target not in live_vars:
+                            # 2a. VAR is NOT in live -> delete this instruction
+                            keep = False
+                            changed = True
+                        else:
+                            # 2b. VAR IS in live -> remove VAR from live, add right side to live
+                            live_vars.remove(target)
+                            right_expr = instr.split('=', 1)[1].strip()
+                            for p in right_expr.split():
+                                # filter out operators and literals
+                                if p not in ('neg', '!', '+', '-', '*', '/', '%', '<', '>', '<=', '>=', '==', '!=', '&&', '||'):
+                                    if self._num(p) is None and not (p.startswith('"') and p.endswith('"')):
+                                        live_vars.add(p)
+                
+                # 3. If it is goto or a label -> do nothing, keep it (already handled by keep=True)
                 
                 if keep:
                     new_optimized_reversed.append(instr)
-                    
+
             final_optimized = new_optimized_reversed[::-1]
+
 
         # ---------------------------------------------------------
         # Phase 4: Label and Jump Optimization (Requested)
