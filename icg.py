@@ -143,21 +143,28 @@ class TACGenerator:
         # ---- If / Else ------------------------------------------
         elif nt == "IfStatement":
             cond    = self.visit(node["condition"])
-            L_else  = self.new_label()
-            L_end   = self.new_label()
-            self.emit(f"ifFalse {cond} goto {L_else}")
-            for s in node.get("body", []):
-                self.visit(s)
-            self.emit(f"goto {L_end}")
-            self.emit(f"{L_else}:")
             eb = node.get("else_body")
+            
             if eb:
+                L_else  = self.new_label()
+                L_end   = self.new_label()
+                self.emit(f"ifFalse {cond} goto {L_else}")
+                for s in node.get("body", []):
+                    self.visit(s)
+                self.emit(f"goto {L_end}")
+                self.emit(f"{L_else}:")
                 if isinstance(eb, list):
                     for s in eb:
                         self.visit(s)
                 else:
                     self.visit(eb)
-            self.emit(f"{L_end}:")
+                self.emit(f"{L_end}:")
+            else:
+                L_end = self.new_label()
+                self.emit(f"ifFalse {cond} goto {L_end}")
+                for s in node.get("body", []):
+                    self.visit(s)
+                self.emit(f"{L_end}:")
 
         # ---- Jump ----------------------------------------------
         elif nt == "BreakStatement":
@@ -600,8 +607,9 @@ class TACExecutor:
         self.env          = {}
         self.output_lines = []
         self.stdin_iter   = iter(stdin_values or [])
-        self.max_steps    = 50_000      # limit steps
+        self.max_steps    = 1_000_000   # limit steps
         self.max_output   = 2_000       # limit output lines to prevent crash
+        self.current_instr= ""
 
     # ------------------------------------------------------------------
     def run(self):
@@ -626,6 +634,12 @@ class TACExecutor:
         while pc < len(self.tac):
             if steps > self.max_steps:
                 self.output_lines.append("\n[RUNTIME ERROR] Maximum instruction limit exceeded (possible infinite loop).")
+                self.output_lines.append("--- Debug Info ---")
+                self.output_lines.append("Variables: " + str(self.env))
+                self.output_lines.append("Last 5 instructions:")
+                start_idx = max(0, pc - 5)
+                for dbg_instr in self.tac[start_idx:pc]:
+                    self.output_lines.append("  " + dbg_instr)
                 break
             if len(self.output_lines) > self.max_output:
                 self.output_lines.append("\n[RUNTIME ERROR] Standard output limit exceeded (buffer overflow).")
@@ -650,133 +664,141 @@ class TACExecutor:
 
             if not parts or instr.endswith(':'):
                 continue
+            
+            self.current_instr = instr
 
-            # goto L
-            if parts[0] == 'goto':
-                if parts[1] in labels:
-                    pc = labels[parts[1]] + 1
-                continue
+            try:
 
-            # ifFalse cond goto L
-            if parts[0] == 'ifFalse':
-                cond  = self._val(parts[1])
-                label = parts[3]
-                if not cond:
-                    pc = labels[label] + 1
-                continue
+                # goto L
+                if parts[0] == 'goto':
+                    if parts[1] in labels:
+                        pc = labels[parts[1]] + 1
+                    continue
 
-            # ifTrue cond goto L
-            if parts[0] == 'ifTrue':
-                cond  = self._val(parts[1])
-                label = parts[3]
-                if cond:
-                    pc = labels[label] + 1
-                continue
+                # ifFalse cond goto L
+                if parts[0] == 'ifFalse':
+                    cond  = self._val(parts[1])
+                    label = parts[3]
+                    if not cond:
+                        pc = labels[label] + 1
+                    continue
 
-            # return [val]
-            if parts[0] == 'return':
-                if not call_stack:
-                    break 
+                # ifTrue cond goto L
+                if parts[0] == 'ifTrue':
+                    cond  = self._val(parts[1])
+                    label = parts[3]
+                    if cond:
+                        pc = labels[label] + 1
+                    continue
 
-                # 1. Capture value from the current (function) scope
-                rv = self._val(parts[1]) if len(parts) > 1 else 0
+                # return [val]
+                if parts[0] == 'return':
+                    if not call_stack:
+                        break 
+
+                    # 1. Capture value from the current (function) scope
+                    rv = self._val(parts[1]) if len(parts) > 1 else 0
                 
-                # 2. Restore caller's scope and return address
-                ret_pc, target, caller_env = call_stack.pop()
-                self.env = caller_env
+                    # 2. Restore caller's scope and return address
+                    ret_pc, target, caller_env = call_stack.pop()
+                    self.env = caller_env
                 
-                # 3. Inject the result into the caller's environment
-                if target:
-                    self.env[target] = rv
+                    # 3. Inject the result into the caller's environment
+                    if target:
+                        self.env[target] = rv
                 
-                pc = ret_pc
-                continue
+                    pc = ret_pc
+                    continue
 
-            # read var
-            if parts[0] == 'read':
-                vid = parts[1]
-                try:
-                    raw = next(self.stdin_iter)
-                    self.env[vid] = self._parse_val(str(raw))
-                except StopIteration:
-                    self.env[vid] = 0
-                continue
+                # read var
+                if parts[0] == 'read':
+                    vid = parts[1]
+                    try:
+                        raw = next(self.stdin_iter)
+                        self.env[vid] = self._parse_val(str(raw))
+                    except StopIteration:
+                        self.env[vid] = 0
+                    continue
 
-            # print val
-            if parts[0] == 'print':
-                rest = instr[6:]
-                if rest == '\\n':
-                    self.output_lines.append('\n')
-                elif rest.startswith('"') and rest.endswith('"'):
-                    self.output_lines.append(rest[1:-1])
-                else:
-                    self.output_lines.append(str(self._val(rest)))
-                continue
-
-            # param x (inside function, just placeholder)
-            if parts[0] == 'param':
-                continue
-
-            # Assignment: target = ...
-            if len(parts) >= 3 and parts[1] == '=':
-                target = parts[0]
-
-                # function call must be checked FIRST
-                if parts[2] == 'call':              # t = call fname(args)
-                    call_expr = instr.split('=', 1)[1].strip()   # "call add(3, 3)"
-                    call_expr = call_expr[len("call "):].strip() # "add(3, 3)"
-
-                    if '(' in call_expr:
-                        fname = call_expr.split('(')[0].strip()
-                        args_str = call_expr.split('(', 1)[1].rsplit(')', 1)[0]
+                # print val
+                if parts[0] == 'print':
+                    rest = instr[6:]
+                    if rest == '\\n':
+                        self.output_lines.append('\n')
+                    elif rest.startswith('"') and rest.endswith('"'):
+                        self.output_lines.append(rest[1:-1])
                     else:
-                        fname = call_expr.strip()
-                        args_str = ""
+                        self.output_lines.append(str(self._val(rest)))
+                    continue
 
-                    if fname in labels:
-                        args_vals = []
-                        for arg in args_str.split(','):
-                            clean_arg = arg.strip()
-                            if clean_arg:
-                                args_vals.append(self._val(clean_arg))
+                # param x (inside function, just placeholder)
+                if parts[0] == 'param':
+                    continue
 
-                        call_stack.append((pc, target, self.env.copy()))
+                # Assignment: target = ...
+                if len(parts) >= 3 and parts[1] == '=':
+                    target = parts[0]
 
-                        new_env = {}
-                        f_pc = labels[fname] + 1
-                        arg_idx = 0
-                        while f_pc < len(self.tac) and self.tac[f_pc].strip().startswith('param '):
-                            pname = self.tac[f_pc].strip().split()[1]
-                            if arg_idx < len(args_vals):
-                                new_env[pname] = args_vals[arg_idx]
-                            arg_idx += 1
-                            f_pc += 1
+                    # function call must be checked FIRST
+                    if parts[2] == 'call':              # t = call fname(args)
+                        call_expr = instr.split('=', 1)[1].strip()   # "call add(3, 3)"
+                        call_expr = call_expr[len("call "):].strip() # "add(3, 3)"
 
-                        self.env = new_env
-                        pc = f_pc
-                    else:
-                        self.env[target] = 0
+                        if '(' in call_expr:
+                            fname = call_expr.split('(')[0].strip()
+                            args_str = call_expr.split('(', 1)[1].rsplit(')', 1)[0]
+                        else:
+                            fname = call_expr.strip()
+                            args_str = ""
 
-                elif len(parts) == 3:               # t = val
-                    self.env[target] = self._val(parts[2])
+                        if fname in labels:
+                            args_vals = []
+                            for arg in args_str.split(','):
+                                clean_arg = arg.strip()
+                                if clean_arg:
+                                    args_vals.append(self._val(clean_arg))
 
-                elif len(parts) == 4:               # t = op operand
-                    op, operand = parts[2], parts[3]
-                    v = self._val(operand)
-                    if op == 'neg':
-                        self.env[target] = -v
-                    elif op == '!':
-                        self.env[target] = int(not bool(v))
-                    else:
-                        self.env[target] = v
+                            call_stack.append((pc, target, self.env.copy()))
 
-                elif len(parts) == 5:               # t = left op right
-                    left  = self._val(parts[2])
-                    op    = parts[3]
-                    right = self._val(parts[4])
-                    self.env[target] = self._arith(op, left, right)
+                            new_env = {}
+                            f_pc = labels[fname] + 1
+                            arg_idx = 0
+                            while f_pc < len(self.tac) and self.tac[f_pc].strip().startswith('param '):
+                                pname = self.tac[f_pc].strip().split()[1]
+                                if arg_idx < len(args_vals):
+                                    new_env[pname] = args_vals[arg_idx]
+                                arg_idx += 1
+                                f_pc += 1
 
-                continue
+                            self.env = new_env
+                            pc = f_pc
+                        else:
+                            self.env[target] = 0
+
+                    elif len(parts) == 3:               # t = val
+                        self.env[target] = self._val(parts[2])
+
+                    elif len(parts) == 4:               # t = op operand
+                        op, operand = parts[2], parts[3]
+                        v = self._val(operand)
+                        if op == 'neg':
+                            self.env[target] = -v
+                        elif op == '!':
+                            self.env[target] = int(not bool(v))
+                        else:
+                            self.env[target] = v
+
+                    elif len(parts) == 5:               # t = left op right
+                        left  = self._val(parts[2])
+                        op    = parts[3]
+                        right = self._val(parts[4])
+                        self.env[target] = self._arith(op, left, right)
+
+                    continue
+
+            except Exception as e:
+                self.output_lines.append(f"\n[RUNTIME ERROR] {str(e)}")
+                break
 
         return ''.join(self.output_lines)
 
@@ -796,35 +818,45 @@ class TACExecutor:
         token = token.strip()
         if token in self.env:
             return self.env[token]
+        if token.startswith('"') and token.endswith('"'):
+            return token[1:-1]
+        if token.isidentifier() and token not in ('neg', '!', 'call', 'true', 'false'):
+            raise Exception(f"Variable '{token}' used before assignment at: {self.current_instr}")
         return self._parse_val(token)
 
     def _arith(self, op, l, r):
         try:
             lv = float(l)
             rv = float(r)
+        except ValueError:
+            lv = 0.0
+            rv = 0.0
             
-            if op == '+':  res = lv + rv
-            elif op == '-':  res = lv - rv
-            elif op == '*':  res = lv * rv
-            elif op == '/':  res = lv / rv if rv != 0 else "DIV/0"
-            elif op == '%':  res = lv % rv
-            elif op == '<':  res = 1 if lv < rv else 0
-            elif op == '>':  res = 1 if lv > rv else 0
-            elif op == '<=': res = 1 if lv <= rv else 0
-            elif op == '>=': res = 1 if lv >= rv else 0
-            elif op == '==': res = 1 if lv == rv else 0
-            elif op == '!=': res = 1 if lv != rv else 0
-            elif op == '&&': res = 1 if lv and rv else 0
-            elif op == '||': res = 1 if lv or rv else 0
-            else: res = 0
+        if op == '+':  res = lv + rv
+        elif op == '-':  res = lv - rv
+        elif op == '*':  res = lv * rv
+        elif op == '/':
+            if rv == 0:
+                raise Exception(f"Division by zero at: {self.current_instr}")
+            res = lv / rv
+        elif op == '%':
+            if rv == 0:
+                raise Exception(f"Division by zero at: {self.current_instr}")
+            res = lv % rv
+        elif op == '<':  res = 1 if lv < rv else 0
+        elif op == '>':  res = 1 if lv > rv else 0
+        elif op == '<=': res = 1 if lv <= rv else 0
+        elif op == '>=': res = 1 if lv >= rv else 0
+        elif op == '==': res = 1 if lv == rv else 0
+        elif op == '!=': res = 1 if lv != rv else 0
+        elif op == '&&': res = 1 if lv and rv else 0
+        elif op == '||': res = 1 if lv or rv else 0
+        else: res = 0
 
-            # Smart conversion: 6.0 -> 6, but 15.5 stays 15.5
-            if isinstance(res, float) and res.is_integer():
-                return int(res)
-            return res
-        except:
-            pass
-        return 0
+        # Smart conversion: 6.0 -> 6, but 15.5 stays 15.5
+        if isinstance(res, float) and res.is_integer():
+            return int(res)
+        return res
 
     def _call(self, call_str):
         # call_str looks like: "max(a, b)" or "abs(t1)"
