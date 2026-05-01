@@ -112,16 +112,20 @@ class Parser:
                     str_form.append(token_aliases.get(tok_name, tok_name))
             return str_form
         
+        last_form_str = None
         while True:
             # Format current form
             form_literals = get_literals(current_sentential)
             form_str = " ".join(form_literals)
             
-            if step_counter == 1:
-                steps.append(f"Step {step_counter}:\n{cst_root.lhs}")
-            else:
-                steps.append(f"Step {step_counter}:\n-> {form_str}")
-            step_counter += 1
+            # Only record step if the sentential form has changed
+            if form_str != last_form_str:
+                if step_counter == 1:
+                    steps.append(f"Step {step_counter}:\n{cst_root.lhs}")
+                else:
+                    steps.append(f"Step {step_counter}:\n-> {form_str}")
+                step_counter += 1
+                last_form_str = form_str
             
             # Find RIGHT-MOST CSTNode (Strict Right-Most Derivation)
             idx = -1
