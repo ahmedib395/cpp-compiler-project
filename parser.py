@@ -179,7 +179,7 @@ class Parser:
             globals_cst.append(g_cst)
             
         # Build left-associative CST: GlobalList -> GlobalList Global | empty
-        curr_cst = CSTNode("GlobalList", ["empty"])
+        curr_cst = CSTNode("GlobalList", [])
         for g_cst in globals_cst:
             curr_cst = CSTNode("GlobalList", [curr_cst, g_cst])
             
@@ -256,7 +256,7 @@ class Parser:
                 params_cst.append(p_cst)
                 
         # Build left-associative CST: ParamList -> ParamList Param | empty
-        curr_cst = CSTNode("ParamList", ["empty"])
+        curr_cst = CSTNode("ParamList", [])
         for p_cst in params_cst:
             curr_cst = CSTNode("ParamList", [curr_cst, p_cst])
             
@@ -288,7 +288,7 @@ class Parser:
             stmt_cst_list.append(s_cst)
             
         # Build left-associative CST: StatementList -> StatementList Statement | empty
-        curr_cst = CSTNode("StatementList", ["empty"])
+        curr_cst = CSTNode("StatementList", [])
         for s_cst in stmt_cst_list:
             curr_cst = CSTNode("StatementList", [curr_cst, s_cst])
             
@@ -533,7 +533,7 @@ class Parser:
             else:
                 body_ast, body_cst = self.parse_BlockOrStmt()
                 return body_ast, CSTNode("ElsePart", [('ELSE', 'else'), body_cst])
-        return None, CSTNode("ElsePart", ["empty"])
+        return None, CSTNode("ElsePart", [])
 
     def parse_BlockOrStmt(self):
         if self.peek() == 'LBRACE':
@@ -735,7 +735,7 @@ class Parser:
 
     def parse_ArgList(self):
         if self.peek() in ('RPAREN', 'EOF'):
-            return [], CSTNode("ArgList", ["empty"])
+            return [], CSTNode("ArgList", [])
             
         ast_list = []
         cst_list = []
