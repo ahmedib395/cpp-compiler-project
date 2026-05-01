@@ -29,14 +29,17 @@ def compile_code(input_file):
 
     # Phase 2
     try:
-        ast = parser.parse(tokens)
-        print("[2/4] Syntax Analysis (SLR-1):   PASS")
+        ast, derivation = parser.parse(tokens)
+        print("[2/4] Top-Down Expansion:   PASS")
     except parser.SyntaxErrorExt as e:
-        print(f"[2/4] Syntax Analysis (SLR-1):   FAILED\n{e}")
+        print(f"[2/4] Top-Down Expansion:   FAILED\n{e}")
         sys.exit(1)
 
     with open("ast_output.json", "w") as f:
         json.dump(ast, f, indent=4)
+
+    with open("derivation_output.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(derivation))
 
     # Phase 3
     try:
