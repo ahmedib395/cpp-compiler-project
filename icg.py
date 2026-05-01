@@ -585,6 +585,11 @@ class TACExecutor:
                         break
 
         pc    = 0
+        # Always start execution at main:
+        for i, instr in enumerate(self.tac):
+            if instr == 'main:':
+                pc = i + 1
+                break
         steps = 0
         call_stack = [] # (return_pc, target_var, saved_env)
 
@@ -605,13 +610,16 @@ class TACExecutor:
             
             # Skip function bodies if we are in global scope
             if not call_stack:
-                skip = False
-                for start, end in func_boundaries:
-                    if start <= pc <= end:
-                        pc = end + 1
-                        skip = True
-                        break
-                if skip: continue
+                instr_peek = self.tac[pc] if pc < len(self.tac) else ""
+                # Skip everything until we find main:
+                if 'main:' not in [self.tac[i] for i in range(max(0, pc-1), pc+1)]:
+                    skip = False
+                    for start, end in func_boundaries:
+                        if start <= pc <= end:
+                            pc = end + 1
+                            skip = True
+                            break
+                    if skip: continue
 
             if pc >= len(self.tac): break
             
