@@ -106,7 +106,7 @@ class Parser:
                 if isinstance(n, CSTNode):
                     str_form.append(n.lhs)
                 elif n == "empty":
-                    continue # Skip empty entirely
+                    str_form.append("δ")
                 else:
                     tok_name = n[0]
                     str_form.append(token_aliases.get(tok_name, tok_name))
@@ -178,10 +178,10 @@ class Parser:
             ast_list.append(g_ast)
             globals_cst.append(g_cst)
             
-        # Build right-associative CST: GlobalList -> Global GlobalList | empty
+        # Build left-associative CST: GlobalList -> GlobalList Global | empty
         curr_cst = CSTNode("GlobalList", ["empty"])
-        for g_cst in reversed(globals_cst):
-            curr_cst = CSTNode("GlobalList", [g_cst, curr_cst])
+        for g_cst in globals_cst:
+            curr_cst = CSTNode("GlobalList", [curr_cst, g_cst])
             
         return ast_list, curr_cst
 
@@ -255,10 +255,10 @@ class Parser:
                 params_ast.append(p_ast)
                 params_cst.append(p_cst)
                 
-        # Build right-associative CST: ParamList -> Param COMMA ParamList | Param | empty
+        # Build left-associative CST: ParamList -> ParamList Param | empty
         curr_cst = CSTNode("ParamList", ["empty"])
-        for p_cst in reversed(params_cst):
-            curr_cst = CSTNode("ParamList", [p_cst, curr_cst])
+        for p_cst in params_cst:
+            curr_cst = CSTNode("ParamList", [curr_cst, p_cst])
             
         return params_ast, curr_cst
 
@@ -287,10 +287,10 @@ class Parser:
             ast_list.append(s_ast)
             stmt_cst_list.append(s_cst)
             
-        # Build right-associative CST: StatementList -> Statement StatementList | empty
+        # Build left-associative CST: StatementList -> StatementList Statement | empty
         curr_cst = CSTNode("StatementList", ["empty"])
-        for s_cst in reversed(stmt_cst_list):
-            curr_cst = CSTNode("StatementList", [s_cst, curr_cst])
+        for s_cst in stmt_cst_list:
+            curr_cst = CSTNode("StatementList", [curr_cst, s_cst])
             
         return ast_list, curr_cst
 
