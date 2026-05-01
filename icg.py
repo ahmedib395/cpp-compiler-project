@@ -520,8 +520,19 @@ class TACOptimizer:
             for instr in final_optimized:
                 parts = instr.split()
                 if not parts: continue
-                if parts[0] == 'goto': used_labels.add(parts[1])
-                elif parts[0] in ('ifTrue', 'ifFalse'): used_labels.add(parts[3])
+                if parts[0] == 'goto':
+                    used_labels.add(parts[1])
+                elif parts[0] in ('ifTrue', 'ifFalse'):
+                    used_labels.add(parts[3])
+                elif 'call' in instr and '(' in instr:
+                    fname = instr.split('call')[1].strip().split('(')[0].strip()
+                    used_labels.add(fname)
+            # Also preserve function definition labels (label followed by param instruction)
+            for i, instr in enumerate(final_optimized):
+                if instr.endswith(':'):
+                    lname = instr[:-1]
+                    if i + 1 < len(final_optimized) and final_optimized[i+1].startswith('param'):
+                        used_labels.add(lname)
             
             cleaned = []
             for instr in final_optimized:
