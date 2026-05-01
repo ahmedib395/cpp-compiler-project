@@ -118,7 +118,7 @@ class Parser:
             form_str = " ".join(form_literals)
             
             if step_counter == 1:
-                steps.append(f"Step {step_counter}:\n{cst_root.lhs} -> {form_str}")
+                steps.append(f"Step {step_counter}:\n{cst_root.lhs}")
             else:
                 steps.append(f"Step {step_counter}:\n-> {form_str}")
             step_counter += 1
