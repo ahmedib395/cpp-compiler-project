@@ -1,61 +1,67 @@
-# Context Free Grammar (CFG) for Phase 1 - 4
-# Top-Down Parser (Recursive Descent Expansion)
-# Uses exact terminal token types matched in lexer.py.
-
 Program -> IncludeStmt UsingStmt GlobalList
 
-# Mandatory Boilerplate
 IncludeStmt -> PREPROCESSOR
 UsingStmt -> USING NAMESPACE IDENTIFIER SEMI
 
-# List of global entities (EBNF repetition for Top-Down parsing)
-GlobalList -> { Global }
+GlobalList -> GlobalList Global | δ
 Global -> FunctionDef | Declaration | Statement
 
 FunctionDef -> Type MAIN LPAREN ParamList RPAREN LBRACE StatementList RBRACE
              | Type IDENTIFIER LPAREN ParamList RPAREN LBRACE StatementList RBRACE
 
-ParamList -> Param { COMMA Param } | empty
+ParamList -> ParamList COMMA Param | Param | δ
 Param -> Type IDENTIFIER
 
-Type -> INT | FLOAT | DOUBLE | CHAR | BOOL | VOID | CONST INT | CONST FLOAT | CONST DOUBLE
+Type -> INT | FLOAT | DOUBLE | CHAR | BOOL | VOID
+      | CONST INT | CONST FLOAT | CONST DOUBLE
 
-StatementList -> { Statement }
-Statement -> Declaration \
-           | Assignment \
-           | WhileLoop \
-           | ForLoop \
-           | DoWhile \
-           | IfStatement \
-           | BreakStmt \
-           | ContinueStmt \
-           | CinStmt \
-           | CoutStmt \
-           | ReturnStmt \
-           | Expression SEMI
+StatementList -> StatementList Statement | δ
+Statement -> Declaration
+           | Assignment
+           | WhileLoop
+           | ForLoop
+           | DoWhile
+           | IfStatement
+           | BreakStmt
+           | ContinueStmt
+           | CinStmt
+           | CoutStmt
+           | ReturnStmt
+           | ExprStatement
 
-Declaration -> Type IDENTIFIER SEMI | Type IDENTIFIER ASSIGN Expression SEMI | Type VarList SEMI
-VarList -> VarItem { COMMA VarItem }
+Declaration -> Type IDENTIFIER SEMI
+             | Type IDENTIFIER ASSIGN Expression SEMI
+             | Type VarList SEMI
+
+VarList -> VarList COMMA VarItem | VarItem
 VarItem -> IDENTIFIER | IDENTIFIER ASSIGN Expression
 
-Assignment -> IDENTIFIER ASSIGN Expression SEMI \
-            | IDENTIFIER PLUS_ASSIGN Expression SEMI \
-            | IDENTIFIER MINUS_ASSIGN Expression SEMI \
-            | IDENTIFIER TIMES_ASSIGN Expression SEMI \
-            | IDENTIFIER DIV_ASSIGN Expression SEMI \
-            | IDENTIFIER INC SEMI \
+Assignment -> IDENTIFIER ASSIGN Expression SEMI
+            | IDENTIFIER PLUS_ASSIGN Expression SEMI
+            | IDENTIFIER MINUS_ASSIGN Expression SEMI
+            | IDENTIFIER TIMES_ASSIGN Expression SEMI
+            | IDENTIFIER DIV_ASSIGN Expression SEMI
+            | IDENTIFIER INC SEMI
             | IDENTIFIER DEC SEMI
 
 WhileLoop -> WHILE LPAREN Condition RPAREN BlockOrStmt
 ForLoop -> FOR LPAREN ForInit Condition SEMI ForUpdate RPAREN BlockOrStmt
-ForInit -> Type IDENTIFIER ASSIGN Expression SEMI | IDENTIFIER ASSIGN Expression SEMI | SEMI
-ForUpdate -> IDENTIFIER INC | IDENTIFIER DEC | IDENTIFIER ASSIGN Expression | IDENTIFIER PLUS_ASSIGN Expression | IDENTIFIER MINUS_ASSIGN Expression | empty
+ForInit -> Type IDENTIFIER ASSIGN Expression SEMI
+         | IDENTIFIER ASSIGN Expression SEMI
+         | SEMI
+ForUpdate -> IDENTIFIER INC
+           | IDENTIFIER DEC
+           | IDENTIFIER ASSIGN Expression
+           | IDENTIFIER PLUS_ASSIGN Expression
+           | IDENTIFIER MINUS_ASSIGN Expression
+           | δ
+
 DoWhile -> DO BlockOrStmt WHILE LPAREN Condition RPAREN SEMI
 
 IfStatement -> IF LPAREN Condition RPAREN BlockOrStmt ElsePart
-ElsePart -> ELSE IF LPAREN Condition RPAREN BlockOrStmt ElsePart \
-          | ELSE BlockOrStmt \
-          | empty
+ElsePart -> ELSE IF LPAREN Condition RPAREN BlockOrStmt ElsePart
+          | ELSE BlockOrStmt
+          | δ
 
 BlockOrStmt -> LBRACE StatementList RBRACE | Statement
 
@@ -63,29 +69,39 @@ BreakStmt -> BREAK SEMI
 ContinueStmt -> CONTINUE SEMI
 ReturnStmt -> RETURN Expression SEMI | RETURN SEMI
 
-CinStmt -> CIN { SHR IDENTIFIER } SEMI
-CoutStmt -> COUT { SHL CoutAtom } SEMI
+CinStmt -> CinStmt SHR IDENTIFIER | CIN SHR IDENTIFIER
+CoutStmt -> CoutStmt SHL CoutAtom | COUT SHL CoutAtom
 CoutAtom -> Expression | STRING | ENDL
 
-Condition -> AndCond { OR AndCond }
-AndCond -> CondAtom { AND CondAtom }
-CondAtom -> NOT CondAtom | Expression RelOp Expression | Expression
+Condition -> Condition OR AndCond | AndCond
+AndCond -> AndCond AND CondAtom | CondAtom
+CondAtom -> NOT CondAtom
+          | Expression RelOp Expression
+          | Expression
 
 RelOp -> EQ | NEQ | LT | GT | LEQ | GEQ
 
-# Math expressions (Top-Down precedence levels)
-Expression -> Term { (PLUS | MINUS) Term }
-Term -> Unary { (TIMES | DIVIDE | MOD) Unary }
+Expression -> Expression PLUS Term
+            | Expression MINUS Term
+            | Term
+
+Term -> Term TIMES Unary
+      | Term DIVIDE Unary
+      | Term MOD Unary
+      | Unary
+
 Unary -> MINUS Factor | NOT Factor | Factor
 
-Factor -> LPAREN Expression RPAREN \
-        | IDENTIFIER LPAREN ArgList RPAREN \
-        | IDENTIFIER \
-        | NUMBER \
-        | FLOAT_NUM \
-        | STRING \
-        | CHAR_LIT \
-        | TRUE \
+Factor -> LPAREN Expression RPAREN
+        | IDENTIFIER LPAREN ArgList RPAREN
+        | IDENTIFIER
+        | NUMBER
+        | FLOAT_NUM
+        | STRING
+        | CHAR_LIT
+        | TRUE
         | FALSE
 
-ArgList -> Expression { COMMA Expression } | empty
+ArgList -> ArgList COMMA Expression | Expression | δ
+
+ExprStatement -> Expression SEMI
