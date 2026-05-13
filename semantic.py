@@ -9,6 +9,7 @@ class SemanticAnalyzer:
         self.ast         = ast
         self.scopes      = [{}]   # Stack of dictionaries for scoping
         self.all_symbols = {}     # FLAT symbol table for UI output
+        self.functions   = {"main": "int"}   # Track declared functions
         self.loop_depth  = 0
 
     def analyze(self):
@@ -60,12 +61,19 @@ class SemanticAnalyzer:
             self.scopes.pop()
 
         elif nt == "FunctionDefinition":
+            fname = node["name"]
+            self.functions[fname] = node["return_type"]
             self.scopes.append({})
             for param in node.get("params", []):
                 self.declare(param["id"], param["var_type"], param.get("line", 0))
             for stmt in node.get("body", []):
                 self.visit(stmt)
             self.scopes.pop()
+
+        elif nt == "FunctionPrototype":
+            fname = node["name"]
+            self.functions[fname] = node["return_type"]
+            # No body to visit
 
         # ---- Declarations ----------------------------------------
         elif nt == "Declaration":
@@ -202,9 +210,20 @@ class SemanticAnalyzer:
             return self.visit(node.get("operand"))
 
         elif nt == "FunctionCall":
+            fname = node["name"]
+            line  = node.get("line", 0)
+            if fname not in self.functions:
+                # Basic check: is it a common library function?
+                if fname not in ("printf", "scanf", "pow", "sqrt", "abs"):
+                    raise SemanticError(
+                        f"SEMANTIC ERROR at Line {line}: "
+                        f"Function '{fname}' was not declared in this scope."
+                    )
+            
             for arg in node.get("args", []):
                 self.visit(arg)
-            return "int"   # treat all library calls as returning int for now
+            
+            return self.functions.get(fname, "int")
 
         elif nt == "Identifier":
             return self.lookup(node["value"], node.get("line", 0))
