@@ -226,6 +226,18 @@ class Parser:
         self.match('LPAREN')
         p_ast, p_cst = self.parse_ParamList()
         self.match('RPAREN')
+        
+        if self.peek() == 'SEMI':
+            self.match('SEMI')
+            ast = node("FunctionPrototype", name=name, return_type=typ_ast, params=p_ast, line=line)
+            cst = CSTNode("FunctionDef", [
+                typ_cst, 
+                ('MAIN' if name == 'main' else 'IDENTIFIER', name), 
+                ('LPAREN', '('), p_cst, ('RPAREN', ')'), 
+                ('SEMI', ';')
+            ])
+            return ast, cst
+
         self.match('LBRACE')
         s_ast, s_cst = self.parse_StatementList()
         self.match('RBRACE')
@@ -725,15 +737,16 @@ class Parser:
         elif self.peek() == 'FALSE':
             val, _ = self.match('FALSE')
             return node("BoolLiteral", value=False, line=line), CSTNode("Factor", [('FALSE', 'false')])
-        elif self.peek() == 'IDENTIFIER':
-            id_val, _ = self.match('IDENTIFIER')
+        elif self.peek() in ('IDENTIFIER', 'MAIN', 'CIN', 'COUT', 'ENDL'):
+            id_tok = self.peek()
+            id_val, _ = self.match(id_tok)
             if self.peek() == 'LPAREN':
                 self.match('LPAREN')
                 args_ast, args_cst = self.parse_ArgList()
                 self.match('RPAREN')
-                return node("FunctionCall", name=id_val, args=args_ast, line=line), CSTNode("Factor", [('IDENTIFIER', id_val), ('LPAREN', '('), args_cst, ('RPAREN', ')')])
+                return node("FunctionCall", name=id_val, args=args_ast, line=line), CSTNode("Factor", [(id_tok, id_val), ('LPAREN', '('), args_cst, ('RPAREN', ')')])
             else:
-                return node("Identifier", value=id_val, line=line), CSTNode("Factor", [('IDENTIFIER', id_val)])
+                return node("Identifier", value=id_val, line=line), CSTNode("Factor", [(id_tok, id_val)])
         else:
             raise SyntaxErrorExt(f"SYNTAX ERROR at Line {line}: Unexpected token '{self.current_token[1]}' in Factor.")
 
