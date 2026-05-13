@@ -56,6 +56,9 @@ class TACGenerator:
                 self.visit(s)
             self.emit("return")
 
+        elif nt == "FunctionPrototype":
+            pass
+
         # ---- Declarations ----------------------------------------
         elif nt == "Declaration":
             vid = node["id"]
@@ -975,10 +978,16 @@ class TACExecutor:
                             break
 
         pc = 0
+        # Search for main to ensure it exists, but start at 0 to run global code
+        main_found = False
         for i, instr in enumerate(self.tac):
             if instr == 'main:':
-                pc = i + 1
+                main_found = True
                 break
+        
+        if not main_found:
+            # If no main:, we just run from 0 (though normally main is required)
+            pass
 
         steps      = 0
         call_stack = []
@@ -1089,7 +1098,11 @@ class TACExecutor:
                                          for a in args_str.split(',')
                                          if a.strip()] if args_str else []
                             call_stack.append((pc, target, self.env.copy()))
-                            new_env = {}
+                            # When calling a function, we create a new environment but keep the "global" variables
+                            # For simplicity in this compiler, we'll assume any variable not starting with 't' (temp)
+                            # or already in the global scope should be preserved.
+                            # Better: just copy the current env but we'll override locals.
+                            new_env = self.env.copy() 
                             f_pc    = labels[fname] + 1
                             idx     = 0
                             while (f_pc < len(self.tac)
