@@ -62,7 +62,17 @@ class SemanticAnalyzer:
 
         elif nt == "FunctionDefinition":
             fname = node["name"]
-            self.functions[fname] = node["return_type"]
+            rtype = node["return_type"]
+            line  = node.get("line", 0)
+
+            if fname in self.functions and self.functions[fname] != rtype:
+                raise SemanticError(
+                    f"SEMANTIC ERROR at Line {line}: "
+                    f"Conflicting return type for function '{fname}'. "
+                    f"Expected '{self.functions[fname]}', got '{rtype}'."
+                )
+
+            self.functions[fname] = rtype
             self.scopes.append({})
             for param in node.get("params", []):
                 self.declare(param["id"], param["var_type"], param.get("line", 0))
@@ -72,7 +82,16 @@ class SemanticAnalyzer:
 
         elif nt == "FunctionPrototype":
             fname = node["name"]
-            self.functions[fname] = node["return_type"]
+            rtype = node["return_type"]
+            line  = node.get("line", 0)
+
+            if fname in self.functions and self.functions[fname] != rtype:
+                raise SemanticError(
+                    f"SEMANTIC ERROR at Line {line}: "
+                    f"Conflicting return type for prototype '{fname}'. "
+                    f"Expected '{self.functions[fname]}', got '{rtype}'."
+                )
+            self.functions[fname] = rtype
             # No body to visit
 
         # ---- Declarations ----------------------------------------
