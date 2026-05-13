@@ -9,7 +9,9 @@ class SemanticAnalyzer:
         self.ast         = ast
         self.scopes      = [{}]   # Stack of dictionaries for scoping
         self.all_symbols = {}     # FLAT symbol table for UI output
-        self.functions   = {"main": "int"}   # Track declared functions
+        # Track functions: { name: {"return": type, "params": [types], "defined": bool} }
+        self.functions   = {"main": {"return": "int", "params": [], "defined": True}}
+        self.current_function_type = None
         self.loop_depth  = 0
 
     def analyze(self):
@@ -53,46 +55,52 @@ class SemanticAnalyzer:
             pass
 
         elif nt == "MainFunction":
+            self.current_function_type = "int"
             self.scopes.append({})
             for param in node.get("params", []):
                 self.declare(param["id"], param["var_type"], param.get("line", 0))
             for stmt in node.get("body", []):
                 self.visit(stmt)
             self.scopes.pop()
+            self.current_function_type = None
 
         elif nt == "FunctionDefinition":
             fname = node["name"]
             rtype = node["return_type"]
             line  = node.get("line", 0)
+            ptypes = [p["var_type"] for p in node.get("params", [])]
 
-            if fname in self.functions and self.functions[fname] != rtype:
-                raise SemanticError(
-                    f"SEMANTIC ERROR at Line {line}: "
-                    f"Conflicting return type for function '{fname}'. "
-                    f"Expected '{self.functions[fname]}', got '{rtype}'."
-                )
-
-            self.functions[fname] = rtype
+            if fname in self.functions:
+                f_info = self.functions[fname]
+                if f_info["return"] != rtype:
+                    raise SemanticError(f"SEMANTIC ERROR at Line {line}: Conflicting return type for '{fname}'.")
+                if f_info["params"] != ptypes:
+                    raise SemanticError(f"SEMANTIC ERROR at Line {line}: Signature mismatch for '{fname}'.")
+                if f_info["defined"]:
+                    raise SemanticError(f"SEMANTIC ERROR at Line {line}: Redefinition of function '{fname}'.")
+            
+            self.functions[fname] = {"return": rtype, "params": ptypes, "defined": True}
+            self.current_function_type = rtype
             self.scopes.append({})
             for param in node.get("params", []):
                 self.declare(param["id"], param["var_type"], param.get("line", 0))
             for stmt in node.get("body", []):
                 self.visit(stmt)
             self.scopes.pop()
+            self.current_function_type = None
 
         elif nt == "FunctionPrototype":
             fname = node["name"]
             rtype = node["return_type"]
             line  = node.get("line", 0)
+            ptypes = [p["var_type"] for p in node.get("params", [])]
 
-            if fname in self.functions and self.functions[fname] != rtype:
-                raise SemanticError(
-                    f"SEMANTIC ERROR at Line {line}: "
-                    f"Conflicting return type for prototype '{fname}'. "
-                    f"Expected '{self.functions[fname]}', got '{rtype}'."
-                )
-            self.functions[fname] = rtype
-            # No body to visit
+            if fname in self.functions:
+                f_info = self.functions[fname]
+                if f_info["return"] != rtype or f_info["params"] != ptypes:
+                    raise SemanticError(f"SEMANTIC ERROR at Line {line}: Conflicting declaration for '{fname}'.")
+            else:
+                self.functions[fname] = {"return": rtype, "params": ptypes, "defined": False}
 
         # ---- Declarations ----------------------------------------
         elif nt == "Declaration":
@@ -199,7 +207,17 @@ class SemanticAnalyzer:
 
         elif nt == "ReturnStatement":
             if node.get("value"):
-                self.visit(node["value"])
+                rtype = self.visit(node["value"])
+                if self.current_function_type and not self._compatible(self.current_function_type, rtype):
+                    raise SemanticError(
+                        f"SEMANTIC ERROR at Line {node.get('line', 0)}: "
+                        f"Return type mismatch. Expected {self.current_function_type}, got {rtype}."
+                    )
+            elif self.current_function_type and self.current_function_type != "void":
+                 raise SemanticError(
+                        f"SEMANTIC ERROR at Line {node.get('line', 0)}: "
+                        f"Empty return in non-void function."
+                    )
 
         # ---- I/O -------------------------------------------------
         elif nt == "CinStatement":
@@ -231,18 +249,25 @@ class SemanticAnalyzer:
         elif nt == "FunctionCall":
             fname = node["name"]
             line  = node.get("line", 0)
+            
             if fname not in self.functions:
-                # Basic check: is it a common library function?
                 if fname not in ("printf", "scanf", "pow", "sqrt", "abs"):
-                    raise SemanticError(
-                        f"SEMANTIC ERROR at Line {line}: "
-                        f"Function '{fname}' was not declared in this scope."
-                    )
+                    raise SemanticError(f"SEMANTIC ERROR at Line {line}: Function '{fname}' not declared.")
+                return "int"
+
+            f_info = self.functions[fname]
+            args = node.get("args", [])
             
-            for arg in node.get("args", []):
-                self.visit(arg)
+            if len(args) != len(f_info["params"]):
+                raise SemanticError(f"SEMANTIC ERROR at Line {line}: Function '{fname}' expects {len(f_info['params'])} arguments, got {len(args)}.")
+
+            for i, arg in enumerate(args):
+                arg_type = self.visit(arg)
+                expected = f_info["params"][i]
+                if not self._compatible(expected, arg_type):
+                    raise SemanticError(f"SEMANTIC ERROR at Line {line}: Argument {i+1} mismatch for '{fname}'. Expected {expected}, got {arg_type}.")
             
-            return self.functions.get(fname, "int")
+            return f_info["return"]
 
         elif nt == "Identifier":
             return self.lookup(node["value"], node.get("line", 0))
