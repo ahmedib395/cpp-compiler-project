@@ -952,6 +952,7 @@ class TACExecutor:
         self.max_steps    = 1_000_000
         self.max_output   = 2_000
         self.current_instr= ""
+        self.tac_uses_cin = any(line.strip().startswith('read ') for line in self.tac)
 
     # ------------------------------------------------------------------
     def run(self):
@@ -1098,20 +1099,31 @@ class TACExecutor:
                                          for a in args_str.split(',')
                                          if a.strip()] if args_str else []
                             call_stack.append((pc, target, self.env.copy()))
-                            # When calling a function, we create a new environment but keep the "global" variables
-                            # For simplicity in this compiler, we'll assume any variable not starting with 't' (temp)
-                            # or already in the global scope should be preserved.
-                            # Better: just copy the current env but we'll override locals.
-                            new_env = self.env.copy() 
-                            f_pc    = labels[fname] + 1
-                            idx     = 0
-                            while (f_pc < len(self.tac)
-                                   and self.tac[f_pc].strip().startswith('param ')):
-                                pname = self.tac[f_pc].strip().split()[1]
-                                if idx < len(args_vals):
-                                    new_env[pname] = args_vals[idx]
-                                idx  += 1
-                                f_pc += 1
+                            # Create new scope: keep globals, but start fresh for locals
+                            new_env = {}
+                            for k, v in self.env.items():
+                                if not k.startswith('t'): # Keep user variables as globals
+                                    new_env[k] = v
+
+                            f_pc = labels[fname] + 1
+                            idx  = 0
+                            # Initialize parameters from the call arguments
+                            while f_pc < len(self.tac):
+                                line = self.tac[f_pc].strip()
+                                if not line:
+                                    f_pc += 1
+                                    continue
+                                if line.startswith('param '):
+                                    pname = line.split()[1]
+                                    if idx < len(args_vals):
+                                        new_env[pname] = args_vals[idx]
+                                    idx  += 1
+                                    f_pc += 1
+                                elif line.endswith(':'):
+                                    f_pc += 1
+                                else:
+                                    break
+                            
                             self.env = new_env
                             pc = f_pc
                         else:
@@ -1235,5 +1247,10 @@ if __name__ == "__main__":
     executor = TACExecutor(opt_tac)
     output   = executor.run()
     print("\n===== PROGRAM OUTPUT =====")
-    print(output if output.strip()
-          else "(no output — program uses cin, provide stdin values)")
+    if output.strip():
+        print(output)
+    else:
+        if executor.tac_uses_cin:
+            print("(no output — program uses cin, provide stdin values)")
+        else:
+            print("(Execution complete - No output generated)")
